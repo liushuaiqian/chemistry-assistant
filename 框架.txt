@@ -1,0 +1,38 @@
+chemistry-assistant/
+├── main.py                     # 启动入口：CLI 或 Web
+├── config.py                   # 配置项（模型URL/API-Key等）
+│
+├── core/                       # 核心控制逻辑
+│   ├── controller.py           # 主控制 Agent 路由分发逻辑
+│   ├── agent_manager.py        # Agent 管理/协作逻辑
+│   └── task_router.py          # 问题类型识别 + 调度路由
+│
+├── agents/                     # 智能体模块（每类子任务一个 Agent）
+│   ├── local_model_agent.py    # 调用微调模型的 Agent
+│   ├── external_agent.py       # OpenAI / 通义 / Claude 等外部 Agent
+│   ├── retriever_agent.py      # 教材/题库检索 Agent
+│   └── tools_agent.py          # 化学计算类工具 Agent
+│
+├── tools/                      # 工具模块（可被注册到 Agent 使用）
+│   ├── chemistry_solver.py     # 摩尔质量、方程式平衡、计算工具
+│   ├── rag_retriever.py        # FAISS 检索接口（教材、题库）
+│   └── knowledge_api.py        # 外部知识库 API 封装（如 PubChem）
+│
+├── models/                     # 模型调用层（本地部署 / API 包装）
+│   ├── local_chat_model.py     # 你微调后的模型的调用接口
+│   └── embedding_model.py      # 向量模型接口（bge、text2vec）
+│
+├── data/                       # 知识数据、题库、索引
+│   ├── textbooks/              # 教材原始文件
+│   ├── question_bank/          # 化学题库（txt、jsonl）
+│   └── vector_store/           # FAISS/Milvus 索引数据
+│
+├── ui/                         # 前端交互层
+│   └── app.py                  # streamlit / gradio 前端（后续可替换为 Web）
+│
+├── utils/                      # 公共函数、日志等
+│   ├── logger.py
+│   └── helpers.py
+│
+├── requirements.txt
+└── README.md

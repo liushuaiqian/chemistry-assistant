@@ -1,0 +1,38 @@
+# 基础依赖
+numpy>=1.20.0
+pandas>=1.3.0
+scipy>=1.7.0
+tqdm>=4.62.0
+requests>=2.26.0
+pyyaml>=6.0
+typing-extensions>=4.0.0
+
+# 机器学习和NLP
+torch>=1.10.0
+transformers>=4.15.0
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.0
+huggingface-hub>=0.4.0
+
+# 化学相关
+rdkit>=2021.09.1
+pubchempy>=1.0.4
+chempy>=0.8.0
+
+# Web界面
+streamlit>=1.10.0
+streamlit-chat>=0.0.2.1
+
+# API客户端
+openai>=0.27.0
+zhipuai>=1.0.0
+anthropic>=0.2.0
+
+# 工具和辅助
+matplotlib>=3.5.0
+seaborn>=0.11.2
+colorlog>=6.7.0
+
+# 图像处理
+Pillow>=10.0.0
+opencv-python>=4.8.0
