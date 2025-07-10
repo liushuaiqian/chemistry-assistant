@@ -10,6 +10,7 @@ import os
 import requests
 import json
 from config import MODEL_CONFIG
+from core.llm_manager import LLMManager
 
 class ExternalAgent:
     """
@@ -27,7 +28,10 @@ class ExternalAgent:
         self.provider = provider
         self.name = f"{provider.capitalize()}外部Agent"
         
-        # 加载配置
+        # 初始化LLM管理器
+        self.llm_manager = LLMManager()
+        
+        # 加载配置（保留用于回退调用）
         self.config = MODEL_CONFIG.get(provider, {})
         self.api_key = self.config.get('api_key', os.environ.get(f"{provider.upper()}_API_KEY", ""))
         self.model = self.config.get('model', '')
@@ -41,6 +45,34 @@ class ExternalAgent:
             query (str): 用户查询
             task_info (dict): 任务相关信息
             context (dict, optional): 上下文信息，包含其他Agent的处理结果
+            
+        Returns:
+            str: 处理结果
+        """
+        try:
+            # 优先使用LangChain LLM管理器
+            if self.llm_manager.is_model_available(self.provider):
+                # 构建上下文信息
+                context_str = ""
+                if context:
+                    context_str = f"上下文信息: {context}"
+                
+                return self.llm_manager.call_chemistry_expert(self.provider, query, context_str)
+            else:
+                # 回退到原始API调用方式
+                return self._process_fallback(query, task_info, context)
+                
+        except Exception as e:
+            return f"处理查询时出错: {str(e)}"
+    
+    def _process_fallback(self, query, task_info, context=None):
+        """
+        回退处理方式
+        
+        Args:
+            query (str): 用户查询
+            task_info (dict): 任务相关信息
+            context (dict, optional): 上下文信息
             
         Returns:
             str: 处理结果
