@@ -11,7 +11,7 @@ MODEL_CONFIG = {
     # 本地模型配置
     'local': {
         'model_path': './models/local_model',  # 本地模型路径
-        'device': 'cuda',  # 运行设备: 'cuda' 或 'cpu'
+        'device': 'cpu',  # 运行设备: 'cuda' 或 'cpu'
     },
     
     # 外部API配置
@@ -55,8 +55,11 @@ MODEL_CONFIG = {
     
     # 向量嵌入模型
     'embedding': {
-        'model_name': 'bge-large-zh-v1.5',  # 或 'text2vec-large-chinese'
-        'device': 'cuda',
+        'model_name': 'bge-large-zh-v1.5',  # 本地模型名称（备用）
+        'device': 'cpu',
+        'use_api': True,  # 是否使用API模式
+        'api_provider': 'zhipu',  # API提供商: 'zhipu', 'tongyi', 'baichuan'
+        'api_model': 'embedding-3',  # API模型名称
     }
 }
 

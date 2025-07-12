@@ -13,6 +13,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.messages import HumanMessage, SystemMessage
 from .llm_manager import LLMManager
+from tools.rag_retriever import RAGRetriever
 
 class ChemistryAnalysisChain:
     """
@@ -26,12 +27,34 @@ class ChemistryAnalysisChain:
         """
         self.logger = logging.getLogger(__name__)
         self.llm_manager = LLMManager()
+        self.rag_retriever = RAGRetriever()
         self._setup_chains()
     
+    def _create_rag_chain(self):
+        """
+        创建RAG检索链
+        """
+        retriever = self.rag_retriever.get_retriever(db_name='textbooks')
+        if not retriever:
+            return None
+
+        def format_docs(docs):
+            return "\n\n".join(doc.page_content for doc in docs)
+
+        rag_chain = (
+            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+            | self.rag_prompt
+            | self.llm_manager.get_model('zhipu')
+            | StrOutputParser()
+        )
+        return rag_chain
+
     def _setup_chains(self):
         """
         设置分析链
         """
+        self._rag_chain = self._create_rag_chain()
+
         # 问题分类提示模板
         self.classification_prompt = PromptTemplate(
             input_variables=["question"],
@@ -69,6 +92,20 @@ class ChemistryAnalysisChain:
 """
         )
         
+        # RAG 检索加强提示模板
+        self.rag_prompt = PromptTemplate(
+            input_variables=["context", "question"],
+            template="""
+你是一个化学专家，请根据以下背景知识来回答问题。
+如果背景知识不足以回答问题，请直接说明“知识库中没有相关信息”。
+
+背景知识:
+{context}
+
+问题: {question}
+"""
+        )
+
         # 解答生成提示模板
         self.solution_prompt = PromptTemplate(
             input_variables=["question", "classification", "analysis"],
@@ -116,6 +153,14 @@ class ChemistryAnalysisChain:
         except Exception as e:
             self.logger.error(f"问题分类失败: {str(e)}")
             return f"分类失败: {str(e)}"
+
+    def invoke_rag_chain(self, question: str) -> str:
+        """
+        直接调用RAG链进行问答
+        """
+        if not self._rag_chain:
+            return "RAG功能未初始化。"
+        return self._rag_chain.invoke(question)
     
     def analyze_question(self, question: str, classification: str) -> str:
         """
@@ -185,6 +230,15 @@ class ChemistryAnalysisChain:
         Returns:
             Dict[str, str]: 包含各阶段结果的字典
         """
+        # 首先进行RAG检索
+        if self._rag_chain:
+            self.logger.info("[化学分析链] 执行RAG检索...")
+            rag_result = self._rag_chain.invoke(question)
+            self.logger.info(f"[化学分析链] RAG结果: {rag_result[:100]}...")
+            # 将RAG结果作为问题的一部分，或上下文
+            question = f"背景知识: {rag_result}\n\n问题: {question}"
+
+
         try:
             self.logger.info(f"[化学分析链] 开始链式处理问题: {question[:50]}...")
             self.logger.info(f"[化学分析链] 问题长度: {len(question)}")

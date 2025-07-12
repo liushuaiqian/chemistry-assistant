@@ -145,7 +145,7 @@ class Controller:
         """
         return self.multimodal_processor.process_input(input_data, input_type)
     
-    def process_with_chain(self, query, use_chain=True, image_data=None):
+    def process_with_chain(self, query, function_type="智能问答", image_data=None):
         """
         使用LangChain链式处理查询
         
@@ -161,7 +161,17 @@ class Controller:
         self.logger.info(f"[LangChain处理] 使用链式处理: {use_chain}")
         self.logger.info(f"[LangChain处理] 是否包含图像: {image_data is not None}")
         
-        if use_chain:
+        if function_type == "信息检索":
+            self.logger.info("[LangChain处理] 执行信息检索...")
+            try:
+                result = self.chemistry_chain.invoke_rag_chain(query)
+                # 对于RAG，我们直接返回结果，不进行后续的链式分析
+                return result, "", {}
+            except Exception as e:
+                self.logger.error(f"[LangChain处理] 信息检索失败: {e}")
+                return f"信息检索失败: {str(e)}", "", {}
+
+        if function_type == "智能问答":
             try:
                 # 如果有图像，先进行图像识别
                 processed_query = query

@@ -91,9 +91,13 @@ def start_ui(controller=None):
         
         try:
             # 根据选择的功能和模型进行处理
-            if function_choice == "LangChain处理" or model_choice == "LangChain链式处理":
-                # 使用LangChain链式处理，传递图像数据
-                response, comparison, chain_result = controller.process_with_chain(question, use_chain=True, image_data=image)
+            if model_choice == "LangChain链式处理":
+                # 使用LangChain链式处理，传递图像数据和功能类型
+                response, comparison, chain_result = controller.process_with_chain(
+                    question, 
+                    function_type=function_choice, 
+                    image_data=image
+                )
                 
                 # 格式化链式处理结果
                 chain_info = ""
