@@ -233,33 +233,3 @@ class Controller:
             self.logger.info("[LangChain处理] 使用传统多模态处理器")
             response, comparison = self.multimodal_processor.process_input(query, 'text')
             return response, comparison, {}
-    
-    def get_available_models(self):
-        """
-        获取所有可用的模型列表
-        
-        Returns:
-            dict: 包含各种模型信息的字典
-        """
-        return {
-            'agents': self.agent_manager.get_available_agents(),
-            'llm_models': self.llm_manager.get_available_models(),
-            'chain_info': self.chemistry_chain.get_chain_info()
-        }
-    
-    def call_specific_model(self, model_name, question, context=""):
-        """
-        调用指定的模型
-        
-        Args:
-            model_name (str): 模型名称
-            question (str): 问题
-            context (str): 上下文
-            
-        Returns:
-            str: 模型回复
-        """
-        if self.llm_manager.is_model_available(model_name):
-            return self.llm_manager.call_chemistry_expert(model_name, question, context)
-        else:
-            return f"模型 {model_name} 不可用"

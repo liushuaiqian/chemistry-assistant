@@ -21,8 +21,6 @@
 - **文件**: `core/controller.py`
 - **新方法**: 
   - `process_with_chain()`: 链式处理
-  - `get_available_models()`: 获取模型信息
-  - `call_specific_model()`: 调用指定模型
 
 ### 4. 改进的用户界面
 - **文件**: `ui/app_gradio.py`
@@ -89,13 +87,9 @@ from core.llm_manager import LLMManager
 # 初始化管理器
 llm_manager = LLMManager()
 
-# 获取可用模型
-models = llm_manager.get_available_models()
-print(f"可用模型: {models}")
-
 # 调用化学专家
 response = llm_manager.call_chemistry_expert(
-    model_name="gpt-3.5-turbo",
+    model_name="default",
     question="什么是化学平衡？"
 )
 print(response)
@@ -133,20 +127,10 @@ from core.controller import Controller
 # 初始化控制器
 controller = Controller()
 
-# 获取系统信息
-models_info = controller.get_available_models()
-print(f"系统模型: {models_info}")
-
 # 链式处理
 response, comparison, chain_result = controller.process_with_chain(
     question="化学问题",
     use_chain=True
-)
-
-# 调用指定模型
-response = controller.call_specific_model(
-    model_name="gpt-3.5-turbo",
-    question="化学问题"
 )
 ```
 

@@ -22,15 +22,14 @@ def simple_chat(message, history):
     else:
         return f"收到您的问题：{message}\n这是化学助手的测试回复。系统正在处理您的问题..."
 
-def process_question(question, model_choice, function_choice, image=None):
+def process_question(question, function_choice, image=None):
     """
     处理用户问题
     """
     if not question.strip():
         return "请输入问题"
     
-    result = f"**模型**: {model_choice}\n"
-    result += f"**功能**: {function_choice}\n"
+    result = f"**功能**: {function_choice}\n"
     result += f"**问题**: {question}\n\n"
     
     if image is not None:
@@ -60,12 +59,7 @@ with gr.Blocks(title="🧪 化学助手测试", theme=gr.themes.Soft()) as demo:
         with gr.Column(scale=1):
             gr.Markdown("### 设置")
             
-            # 模型选择
-            model_choice = gr.Dropdown(
-                choices=["本地模型", "OpenAI", "智谱AI", "Claude", "通义大模型"],
-                value="本地模型",
-                label="选择模型"
-            )
+
             
             # 功能选择
             function_choice = gr.Radio(
@@ -118,14 +112,14 @@ with gr.Blocks(title="🧪 化学助手测试", theme=gr.themes.Soft()) as demo:
     # 事件绑定
     submit_btn.click(
         fn=process_question,
-        inputs=[question_input, model_choice, function_choice, image_input],
+        inputs=[question_input, function_choice, image_input],
         outputs=answer_output
     )
     
     # 回车提交
     question_input.submit(
         fn=process_question,
-        inputs=[question_input, model_choice, function_choice, image_input],
+        inputs=[question_input, function_choice, image_input],
         outputs=answer_output
     )
     

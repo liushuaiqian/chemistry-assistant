@@ -243,21 +243,7 @@ class ChemistryAnalysisChain:
             self.logger.info(f"[化学分析链] 开始链式处理问题: {question[:50]}...")
             self.logger.info(f"[化学分析链] 问题长度: {len(question)}")
             
-            # 检查可用模型
-            available_models = self.llm_manager.get_available_models()
-            self.logger.info(f"[化学分析链] 可用模型: {available_models}")
-            
-            if not available_models:
-                error_msg = "没有可用的模型进行链式处理"
-                self.logger.error(f"[化学分析链] {error_msg}")
-                return {
-                    'question': question,
-                    'error': error_msg,
-                    'classification': '',
-                    'analysis': '',
-                    'solution': '',
-                    'chain_summary': ''
-                }
+
             
             # 第一步：问题分类
             self.logger.info("[化学分析链] 步骤1: 问题分类")
@@ -308,13 +294,7 @@ class ChemistryAnalysisChain:
         Returns:
             str: 选中的模型名称
         """
-        for model in preferred_models:
-            if self.llm_manager.is_model_available(model):
-                return model
-        
-        # 如果优先模型都不可用，返回任意可用模型
-        available_models = self.llm_manager.get_available_models()
-        return available_models[0] if available_models else None
+        return "default"
     
     def _generate_chain_summary(self, classification: str, analysis: str, solution: str) -> str:
         """
@@ -399,7 +379,7 @@ class ChemistryAnalysisChain:
             'name': '化学分析链',
             'description': '基于LangChain的化学问题链式分析工具',
             'steps': ['问题分类', '多角度分析', '解答生成'],
-            'available_models': self.llm_manager.get_available_models(),
+
             'features': [
                 '自动问题分类',
                 '多角度分析',

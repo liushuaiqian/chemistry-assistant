@@ -34,9 +34,7 @@ def test_controller_initialization():
         controller = Controller()
         print("✅ Controller初始化成功")
         
-        # 测试获取可用模型
-        models_info = controller.get_available_models()
-        print(f"📊 可用模型信息: {models_info}")
+        print(f"📊 Controller已初始化")
         
         return controller
     except Exception as e:
@@ -53,24 +51,13 @@ def test_llm_manager():
     
     try:
         llm_manager = LLMManager()
-        available_models = llm_manager.get_available_models()
-        print(f"📋 可用模型: {available_models}")
+        test_question = "什么是化学键？"
+        print(f"\n🧪 测试问题: {test_question}")
         
-        if available_models:
-            test_question = "什么是化学键？"
-            print(f"\n🧪 测试问题: {test_question}")
-            
-            # 测试第一个可用模型
-            model = available_models[0]
-            print(f"🔄 使用模型: {model}")
-            
-            response = llm_manager.call_chemistry_expert(model, test_question)
-            print(f"📝 回答: {response[:200]}..." if len(response) > 200 else f"📝 回答: {response}")
-            
-            return True
-        else:
-            print("⚠️ 没有可用的模型")
-            return False
+        response = llm_manager.call_chemistry_expert("default", test_question)
+        print(f"📝 回答: {response[:200]}..." if len(response) > 200 else f"📝 回答: {response}")
+        
+        return True
             
     except Exception as e:
         print(f"❌ LLM管理器测试失败: {e}")
@@ -156,21 +143,20 @@ def test_ui_simulation():
         controller = Controller()
         
         # 模拟process_question函数的逻辑
-        def simulate_process_question(question, function_choice, image=None, model_choice="本地模型"):
+        def simulate_process_question(question, function_choice, image=None):
             if not question.strip():
                 return "请输入问题", "", ""
             
             # 构建任务信息
             task_info = {
-                'function': function_choice,
-                'model': model_choice
+                'function': function_choice
             }
             
             if image is not None:
                 task_info["image"] = image
             
             try:
-                if function_choice == "LangChain处理" or model_choice == "LangChain链式处理":
+                if function_choice == "LangChain处理":
                     response, comparison, chain_result = controller.process_with_chain(question, use_chain=True)
                     chain_info = ""
                     if chain_result and 'chain_summary' in chain_result:
@@ -184,18 +170,17 @@ def test_ui_simulation():
         
         # 测试不同的输入组合
         test_cases = [
-            ("什么是化学键？", "智能问答", None, "本地模型"),
-            ("计算H2O的摩尔质量", "化学计算", None, "本地模型"),
-            ("什么是原子结构？", "LangChain处理", None, "LangChain链式处理")
+            ("什么是化学键？", "智能问答", None),
+            ("计算H2O的摩尔质量", "化学计算", None),
+            ("什么是原子结构？", "LangChain处理", None)
         ]
         
-        for i, (question, function, image, model) in enumerate(test_cases, 1):
+        for i, (question, function, image) in enumerate(test_cases, 1):
             print(f"\n🧪 UI测试 {i}:")
             print(f"   问题: {question}")
             print(f"   功能: {function}")
-            print(f"   模型: {model}")
             
-            response, comparison, chain_info = simulate_process_question(question, function, image, model)
+            response, comparison, chain_info = simulate_process_question(question, function, image)
             print(f"📝 回答: {response[:100]}..." if len(response) > 100 else f"📝 回答: {response}")
             if comparison:
                 print(f"📊 对比: {comparison[:50]}..." if len(comparison) > 50 else f"📊 对比: {comparison}")

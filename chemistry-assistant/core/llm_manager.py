@@ -292,24 +292,3 @@ class LLMManager:
             # 融合失败时返回简单合并
             combined_answer = "\n\n---\n\n".join([f"**{name}回答：**\n{ans}" for name, ans in answers.items()])
             return combined_answer, comparison_text
-    
-    def get_available_models(self) -> List[str]:
-        """
-        获取可用的模型列表
-        
-        Returns:
-            List[str]: 可用模型名称列表
-        """
-        return list(self.models.keys())
-    
-    def is_model_available(self, model_name: str) -> bool:
-        """
-        检查模型是否可用
-        
-        Args:
-            model_name: 模型名称
-            
-        Returns:
-            bool: 是否可用
-        """
-        return model_name in self.models

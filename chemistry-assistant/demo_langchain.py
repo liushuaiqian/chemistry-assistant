@@ -29,25 +29,15 @@ def demo_llm_manager():
     
     llm_manager = LLMManager()
     
-    # 显示可用模型
-    available_models = llm_manager.get_available_models()
-    print(f"\n📋 可用模型: {available_models}")
-    
-    if not available_models:
-        print("❌ 没有可用的模型，请检查配置")
-        return
-    
     # 测试化学专家调用
     test_question = "请解释酸碱中和反应的原理"
     print(f"\n🧪 测试问题: {test_question}")
     
-    for model in available_models[:2]:  # 只测试前两个模型
-        print(f"\n🤖 使用模型: {model}")
-        try:
-            response = llm_manager.call_chemistry_expert(model, test_question)
-            print(f"📝 回答: {response[:200]}..." if len(response) > 200 else f"📝 回答: {response}")
-        except Exception as e:
-            print(f"❌ 调用失败: {str(e)}")
+    try:
+        response = llm_manager.call_chemistry_expert("default", test_question)
+        print(f"📝 回答: {response[:200]}..." if len(response) > 200 else f"📝 回答: {response}")
+    except Exception as e:
+        print(f"❌ 调用失败: {str(e)}")
 
 def demo_chemistry_chain():
     """
@@ -96,12 +86,7 @@ def demo_controller_integration():
     
     controller = Controller()
     
-    # 显示所有可用模型
-    models_info = controller.get_available_models()
-    print(f"\n📊 系统模型信息:")
-    print(f"   Agents: {models_info['agents']}")
-    print(f"   LLM模型: {models_info['llm_models']}")
-    print(f"   链信息: {models_info['chain_info']['name']}")
+    print(f"\n📊 系统已初始化")
     
     # 测试传统处理 vs 链式处理
     test_question = "什么是化学平衡？请举例说明。"
@@ -134,34 +119,15 @@ def demo_model_comparison():
     print("="*60)
     
     llm_manager = LLMManager()
-    available_models = llm_manager.get_available_models()
-    
-    if len(available_models) < 2:
-        print("❌ 需要至少2个模型才能进行对比")
-        return
     
     test_question = "请解释原电池的工作原理"
     print(f"\n🧪 测试问题: {test_question}")
     
-    # 收集多个模型的答案
-    answers = {}
-    for model in available_models[:3]:  # 最多测试3个模型
-        try:
-            response = llm_manager.call_chemistry_expert(model, test_question)
-            answers[model] = response
-            print(f"\n🤖 {model} 回答: {response[:150]}..." if len(response) > 150 else f"\n🤖 {model} 回答: {response}")
-        except Exception as e:
-            print(f"\n❌ {model} 调用失败: {str(e)}")
-    
-    # 融合答案
-    if len(answers) >= 2:
-        print("\n🔄 正在融合答案...")
-        try:
-            fused_answer, comparison = llm_manager.fuse_answers(test_question, answers)
-            print(f"\n✅ 融合结果: {fused_answer[:200]}..." if len(fused_answer) > 200 else f"\n✅ 融合结果: {fused_answer}")
-            print(f"\n📊 对比分析: {comparison[:200]}..." if len(comparison) > 200 else f"\n📊 对比分析: {comparison}")
-        except Exception as e:
-            print(f"❌ 答案融合失败: {str(e)}")
+    try:
+        response = llm_manager.call_chemistry_expert("default", test_question)
+        print(f"\n📝 回答: {response[:200]}..." if len(response) > 200 else f"\n📝 回答: {response}")
+    except Exception as e:
+        print(f"❌ 调用失败: {str(e)}")
 
 def main():
     """

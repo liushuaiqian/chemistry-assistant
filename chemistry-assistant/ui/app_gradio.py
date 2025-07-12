@@ -20,7 +20,7 @@ def start_ui(controller=None):
         controller: 主控制器实例（可选）
     """
     
-    def process_question(question, function_choice, image=None, model_choice="本地模型"):
+    def process_question(question, function_choice, image=None):
         """
         处理用户问题
         """
@@ -30,7 +30,6 @@ def start_ui(controller=None):
         # 如果controller为None，使用简单的回复逻辑
         if controller is None:
             result = f"**功能**: {function_choice}\n"
-            result += f"**模型**: {model_choice}\n"
             
             if image is not None:
                 result += "**图像**: 已上传图像，但图像识别功能需要完整的系统支持\n\n"
@@ -70,8 +69,7 @@ def start_ui(controller=None):
         
         # 构建任务信息
         task_info = {
-            'function': function_choice,
-            'model': model_choice
+            'function': function_choice
         }
         
         # 如果有图像，添加到任务信息中并处理图像输入
@@ -90,8 +88,8 @@ def start_ui(controller=None):
                 question = f"查询：{question}"
         
         try:
-            # 根据选择的功能和模型进行处理
-            if model_choice == "LangChain链式处理":
+            # 根据选择的功能进行处理
+            if function_choice == "LangChain处理":
                 # 使用LangChain链式处理，传递图像数据和功能类型
                 response, comparison, chain_result = controller.process_with_chain(
                     question, 
@@ -120,25 +118,6 @@ def start_ui(controller=None):
                 
                 return clean_output(response), clean_output(comparison), clean_output(chain_info)
                 
-            elif model_choice.startswith("LangChain-"):
-                # 使用指定的LangChain模型
-                model_name = model_choice.replace("LangChain-", "")
-                response = controller.call_specific_model(model_name, question)
-                
-                # 清理编码问题
-                def clean_output(text):
-                    if not isinstance(text, str):
-                        text = str(text)
-                    import re
-                    text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
-                    try:
-                        text = text.encode('utf-8').decode('utf-8')
-                    except UnicodeError:
-                        text = ''.join(char for char in text if ord(char) < 65536)
-                    return text
-                
-                return clean_output(response), "", f"使用模型: {model_name}"
-                
             else:
                 # 使用传统处理方式
                 response, comparison = controller.process_query(question, task_info)
@@ -147,30 +126,7 @@ def start_ui(controller=None):
         except Exception as e:
             return f"处理出错：{str(e)}", "", ""
     
-    def get_available_models():
-        """
-        获取可用的模型列表
-        """
-        available_models = ["本地模型", "LangChain链式处理"]
-        
-        model_configs = {
-            "OpenAI": "openai",
-            "智谱AI": "zhipu", 
-            "Claude": "claude",
-            "通义大模型": "tongyi"
-        }
-        
-        for model_name, model_key in model_configs.items():
-            if MODEL_CONFIG.get(model_key, {}).get("api_key", ""):
-                available_models.append(model_name)
-        
-        # 添加LangChain可用模型
-        if controller is not None and hasattr(controller, 'llm_manager'):
-            llm_models = controller.llm_manager.get_available_models()
-            for model in llm_models:
-                available_models.append(f"LangChain-{model}")
-        
-        return available_models
+
     
     # 创建Gradio界面
     with gr.Blocks(
@@ -240,13 +196,7 @@ def start_ui(controller=None):
                 
 
                 
-                # 模型选择
-                model_choice = gr.Dropdown(
-                    choices=get_available_models(),
-                    value="本地模型",
-                    label="选择模型",
-                    info="选择要使用的AI模型"
-                )
+
                 
                 # 功能选择
                 function_choice = gr.Radio(
@@ -316,14 +266,14 @@ def start_ui(controller=None):
         # 事件绑定
         submit_btn.click(
             fn=process_question,
-            inputs=[question_input, function_choice, image_input, model_choice],
+            inputs=[question_input, function_choice, image_input],
             outputs=[answer_output, comparison_output, chain_result_output]
         )
         
         # 回车提交
         question_input.submit(
             fn=process_question,
-            inputs=[question_input, function_choice, image_input, model_choice],
+            inputs=[question_input, function_choice, image_input],
             outputs=[answer_output, comparison_output, chain_result_output]
         )
         
