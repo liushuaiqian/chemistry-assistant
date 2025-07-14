@@ -14,6 +14,7 @@ from langchain_openai import ChatOpenAI
 from langchain_community.chat_models import ChatTongyi
 from langchain_core.language_models.chat_models import BaseChatModel
 from config import MODEL_CONFIG
+from utils.output_cleaner import clean_output, clean_model_output
 
 class LLMManager:
     """
@@ -78,6 +79,27 @@ class LLMManager:
         except Exception as e:
             self.logger.error(f"模型初始化失败: {str(e)}")
     
+    def is_model_available(self, model_name: str) -> bool:
+        """
+        检查指定模型是否可用
+        
+        Args:
+            model_name: 模型名称
+            
+        Returns:
+            bool: 模型是否可用
+        """
+        return model_name in self.models
+    
+    def get_available_models(self) -> List[str]:
+        """
+        获取所有可用模型的列表
+        
+        Returns:
+            List[str]: 可用模型名称列表
+        """
+        return list(self.models.keys())
+    
     def call_model(self, model_name: str, messages: List[BaseMessage], **kwargs) -> str:
         """
         调用指定的模型
@@ -108,60 +130,11 @@ class LLMManager:
             self.logger.info(f"[LLM管理器] 模型API调用成功")
             self.logger.info(f"[LLM管理器] 响应类型: {type(response)}")
             
-            # 处理响应内容的编码问题
+            # 处理响应内容 - 只处理真正的编码问题，不破坏原始内容结构
             content = response.content
             self.logger.info(f"[LLM管理器] 响应内容长度: {len(content)}")
             
-            # 清理编码问题和格式化LaTeX
-            def clean_response(text):
-                if not isinstance(text, str):
-                    text = str(text)
-                
-                # 尝试不同的编码解码
-                try:
-                    # 如果是bytes，尝试解码
-                    if isinstance(text, bytes):
-                        try:
-                            text = text.decode('utf-8')
-                        except UnicodeDecodeError:
-                            text = text.decode('gbk', errors='ignore')
-                except:
-                    pass
-                
-                # 移除控制字符和乱码
-                import re
-                text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
-                
-                # 确保UTF-8编码正确
-                try:
-                    text = text.encode('utf-8').decode('utf-8')
-                except UnicodeError:
-                    text = ''.join(char for char in text if ord(char) < 65536)
-                
-                # 格式化LaTeX公式
-                def format_latex_formulas(content):
-                    # 处理化学方程式
-                    # 将化学元素和化合物包装在\ce{}中
-                    content = re.sub(r'\b([A-Z][a-z]?[0-9]*(?:_[0-9]+)?(?:\^[+-]?[0-9]*)?(?:\([a-z]+\))?)\b', r'$\\ce{\1}$', content)
-                    
-                    # 处理化学方程式中的箭头
-                    content = re.sub(r'\\rightarrow', r'$\\rightarrow$', content)
-                    content = re.sub(r'→', r'$\\rightarrow$', content)
-                    content = re.sub(r'\\xrightarrow\{([^}]+)\}', r'$\\xrightarrow{\1}$', content)
-                    
-                    # 处理数学表达式
-                    content = re.sub(r'\\Delta', r'$\\Delta$', content)
-                    content = re.sub(r'\\text\{([^}]+)\}', r'\1', content)
-                    
-                    # 确保连续的化学公式不会重复包装
-                    content = re.sub(r'\$\\ce\{([^}]+)\}\$\s*\+\s*\$\\ce\{([^}]+)\}\$', r'$\\ce{\1 + \2}$', content)
-                    content = re.sub(r'\$\\ce\{([^}]+)\}\$\s*\$\\rightarrow\$\s*\$\\ce\{([^}]+)\}\$', r'$\\ce{\1 \\rightarrow \2}$', content)
-                    
-                    return content
-                
-                text = format_latex_formulas(text)
-                return text
-            
+            # 基础编码处理
             if isinstance(content, bytes):
                 # 如果是字节类型，尝试解码为UTF-8
                 try:
@@ -172,17 +145,19 @@ class LLMManager:
                         content = content.decode('gbk')
                     except UnicodeDecodeError:
                         content = content.decode('utf-8', errors='ignore')
-            elif isinstance(content, str):
-                # 如果是字符串，确保编码正确
-                try:
-                    # 尝试重新编码以确保正确性
-                    content = content.encode('utf-8').decode('utf-8')
-                except UnicodeError:
-                    # 如果编码有问题，清理特殊字符
-                    content = ''.join(char for char in content if ord(char) < 65536)
+            elif not isinstance(content, str):
+                content = str(content)
             
-            # 使用清理函数处理内容
-            content = clean_response(content)
+            # 只移除真正的控制字符，保留正常的换行和制表符
+            import re
+            content = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', content)
+            
+            # 确保UTF-8编码正确
+            try:
+                content = content.encode('utf-8').decode('utf-8')
+            except UnicodeError:
+                # 如果编码有问题，只清理无法编码的字符
+                content = ''.join(char for char in content if ord(char) < 65536)
             
             self.logger.info(f"[LLM管理器] 内容清理完成，最终长度: {len(content)}")
             return content
@@ -281,14 +256,14 @@ class LLMManager:
         if not fusion_model:
             # 如果没有可用的融合模型，返回简单合并
             combined_answer = "\n\n---\n\n".join([f"**{name}回答：**\n{ans}" for name, ans in answers.items()])
-            return combined_answer, comparison_text
+            return clean_output(combined_answer), clean_output(comparison_text)
         
         try:
             messages = [HumanMessage(content=fusion_prompt)]
             fused_answer = self.call_model(fusion_model, messages, temperature=0.3)
-            return fused_answer, comparison_text
+            return clean_model_output(fused_answer), clean_output(comparison_text)
         except Exception as e:
             self.logger.error(f"答案融合失败: {str(e)}")
             # 融合失败时返回简单合并
             combined_answer = "\n\n---\n\n".join([f"**{name}回答：**\n{ans}" for name, ans in answers.items()])
-            return combined_answer, comparison_text
+            return clean_output(combined_answer), clean_output(comparison_text)

@@ -151,14 +151,14 @@ class Controller:
         
         Args:
             query (str): 用户查询
-            use_chain (bool): 是否使用链式处理
+            function_type (str): 功能类型
             image_data: 图像数据（PIL Image对象）
             
         Returns:
             tuple: (回复, 对比分析, 链式分析结果)
         """
         self.logger.info(f"[LangChain处理] 开始处理查询: {query[:50]}...")
-        self.logger.info(f"[LangChain处理] 使用链式处理: {use_chain}")
+        self.logger.info(f"[LangChain处理] 功能类型: {function_type}")
         self.logger.info(f"[LangChain处理] 是否包含图像: {image_data is not None}")
         
         if function_type == "信息检索":
@@ -173,10 +173,10 @@ class Controller:
 
         if function_type == "智能问答":
             try:
-                # 如果有图像，先进行图像识别
-                processed_query = query
+                # 准备图像数据
+                image_base64 = None
                 if image_data is not None:
-                    self.logger.info("[LangChain处理] 检测到图像输入，开始图像识别...")
+                    self.logger.info("[LangChain处理] 检测到图像输入，开始图像转换...")
                     try:
                         import base64
                         from io import BytesIO
@@ -192,36 +192,24 @@ class Controller:
                         if image_data.mode != 'RGB':
                             image_data = image_data.convert('RGB')
                         image_data.save(buffered, format="JPEG", quality=85)
-                        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                        image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
                         
-                        self.logger.info(f"[LangChain处理] 图像转换成功，base64长度: {len(img_str)}")
-                        
-                        # 使用多模态处理器提取图像文本
-                        extracted_text = self.multimodal_processor._extract_text_from_image(img_str)
-                        self.logger.info(f"[LangChain处理] 图像文本提取完成: {extracted_text[:100]}...")
-                        
-                        # 组合查询
-                        if query.strip():
-                            processed_query = f"图像内容：{extracted_text}\n\n用户问题：{query}"
-                        else:
-                            processed_query = f"请分析以下图像内容：{extracted_text}"
-                        
-                        self.logger.info(f"[LangChain处理] 组合查询完成，长度: {len(processed_query)}")
+                        self.logger.info(f"[LangChain处理] 图像转换成功，base64长度: {len(image_base64)}")
                         
                     except Exception as e:
                         self.logger.error(f"[LangChain处理] 图像处理失败: {str(e)}")
                         return f"图像处理失败: {str(e)}", "", {}
                 
-                # 使用化学分析链进行处理
-                self.logger.info("[LangChain处理] 开始调用化学分析链...")
-                chain_result = self.chemistry_chain.process_question_chain(processed_query)
+                # 使用化学分析链的新方法进行处理
+                self.logger.info("[LangChain处理] 开始调用化学分析链的process_with_vision方法...")
+                result = self.chemistry_chain.process_with_vision(
+                    question=query,
+                    image_data=image_base64,
+                    function_type=function_type
+                )
                 self.logger.info("[LangChain处理] 化学分析链处理完成")
                 
-                if 'error' in chain_result:
-                    self.logger.error(f"[LangChain处理] 链式处理出错: {chain_result['error']}")
-                    return chain_result['error'], "", chain_result
-                
-                return chain_result.get('solution', '处理完成但无解答'), "", chain_result
+                return result, "", {"solution": result}
                 
             except Exception as e:
                 self.logger.error(f"[LangChain处理] 处理过程中发生异常: {str(e)}")

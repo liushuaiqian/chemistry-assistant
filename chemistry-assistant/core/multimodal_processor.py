@@ -14,6 +14,7 @@ from config import MODEL_CONFIG
 from utils.logger import setup_logger
 from .llm_manager import LLMManager
 from langchain_core.messages import HumanMessage, SystemMessage
+from utils.output_cleaner import clean_output, clean_model_output, format_output
 
 class MultimodalProcessor:
     """
@@ -101,7 +102,7 @@ class MultimodalProcessor:
         # 4. 融合答案
         fused_answer, _ = self._fuse_answers(combined_query, tongyi_answer, deepseek_answer)
         
-        return fused_answer
+        return clean_model_output(fused_answer)
     
     def process_input(self, input_data: Union[str, bytes], input_type: str = 'auto') -> str:
         """
@@ -138,7 +139,7 @@ class MultimodalProcessor:
             
             self.logger.info(f"最终融合答案: {final_answer[:100]}...")
             
-            return final_answer, comparison
+            return clean_model_output(final_answer), clean_output(comparison)
             
         except Exception as e:
             self.logger.error(f"处理输入时出错: {str(e)}")
@@ -331,7 +332,15 @@ class MultimodalProcessor:
             
             if response.status_code == 200:
                 result = response.json()
-                return result["output"]["text"]
+                # 正确提取通义千问API的响应内容
+                if "output" in result and "text" in result["output"]:
+                    return result["output"]["text"]
+                elif "output" in result and "choices" in result["output"]:
+                    # 某些版本的API可能使用choices格式
+                    return result["output"]["choices"][0]["message"]["content"]
+                else:
+                    self.logger.error(f"通义千问API响应格式异常: {result}")
+                    return "通义千问模型调用失败：响应格式异常。"
             else:
                 self.logger.error(f"通义千问API错误: {response.status_code} - {response.text}")
                 return "通义千问模型调用失败。"
@@ -393,7 +402,22 @@ class MultimodalProcessor:
             )
 
             if response.status_code == 200:
-                return response.output.choices[0].message.content
+                # 正确提取DeepSeek API的响应内容
+                if hasattr(response, 'output') and hasattr(response.output, 'choices'):
+                    choice = response.output.choices[0]
+                    if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
+                        content = choice.message.content
+                        # 检查是否有推理内容（DeepSeek R1等模型）
+                        if hasattr(choice.message, 'reasoning_content') and choice.message.reasoning_content:
+                            reasoning = choice.message.reasoning_content
+                            return f"推理过程：\n{reasoning}\n\n最终答案：\n{content}"
+                        return content
+                    else:
+                        self.logger.error(f"DeepSeek API响应格式异常: 缺少message.content")
+                        return "DeepSeek模型调用失败：响应格式异常。"
+                else:
+                    self.logger.error(f"DeepSeek API响应格式异常: 缺少output.choices")
+                    return "DeepSeek模型调用失败：响应格式异常。"
             else:
                 self.logger.error(f"DeepSeek API错误: {response.status_code} - {response.message}")
                 return "DeepSeek模型调用失败。"
@@ -423,7 +447,7 @@ class MultimodalProcessor:
             
             # 使用LLM管理器进行答案融合
             fused_answer, comparison = self.llm_manager.fuse_answers(question, answers)
-            return fused_answer, comparison
+            return clean_model_output(fused_answer), clean_output(comparison)
             
         except Exception as e:
             self.logger.error(f"答案融合出错: {str(e)}")
@@ -513,7 +537,7 @@ class MultimodalProcessor:
 已通过GLM-4-Plus模型对两个回答进行了深度分析和融合，生成了更准确、更完整的权威答复。
 """
                 
-                return fused_answer, comparison
+                return clean_model_output(fused_answer), clean_output(comparison)
             else:
                 self.logger.error(f"GLM-4-Plus API错误: {response.status_code} - {response.text}")
                 # 如果API调用失败，返回简单合并
@@ -531,7 +555,7 @@ class MultimodalProcessor:
 
 """
                 combined_answer = f"**通义千问回答：**\n{tongyi_answer}\n\n**DeepSeek回答：**\n{deepseek_answer}"
-                return combined_answer, comparison
+                return clean_output(combined_answer), clean_output(comparison)
                 
         except Exception as e:
             self.logger.error(f"回退融合方法出错: {str(e)}")
@@ -550,4 +574,4 @@ class MultimodalProcessor:
 
 """
             combined_answer = f"**通义千问回答：**\n{tongyi_answer}\n\n**DeepSeek回答：**\n{deepseek_answer}"
-            return combined_answer, comparison
+            return clean_output(combined_answer), clean_output(comparison)

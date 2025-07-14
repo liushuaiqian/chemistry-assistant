@@ -159,7 +159,16 @@ class ExternalAgent:
             )
             
             if response.status_code == 200:
-                return response.json()["choices"][0]["message"]["content"]
+                result = response.json()
+                # 正确提取OpenAI格式API的响应内容
+                if "choices" in result and len(result["choices"]) > 0:
+                    choice = result["choices"][0]
+                    if "message" in choice and "content" in choice["message"]:
+                        return choice["message"]["content"]
+                    else:
+                        return f"API响应格式异常: 缺少message.content"
+                else:
+                    return f"API响应格式异常: 缺少choices"
             else:
                 return f"API错误: {response.status_code} - {response.text}"
                 
@@ -199,7 +208,16 @@ class ExternalAgent:
             )
             
             if response.status_code == 200:
-                return response.json()["choices"][0]["message"]["content"]
+                result = response.json()
+                # 正确提取智谱AI API的响应内容
+                if "choices" in result and len(result["choices"]) > 0:
+                    choice = result["choices"][0]
+                    if "message" in choice and "content" in choice["message"]:
+                        return choice["message"]["content"]
+                    else:
+                        return f"API响应格式异常: 缺少message.content"
+                else:
+                    return f"API响应格式异常: 缺少choices"
             else:
                 return f"API错误: {response.status_code} - {response.text}"
                 
@@ -284,7 +302,15 @@ class ExternalAgent:
             )
             
             if response.status_code == 200:
-                return response.json()["output"]["text"]
+                result = response.json()
+                # 正确提取通义千问API的响应内容
+                if "output" in result and "text" in result["output"]:
+                    return result["output"]["text"]
+                elif "output" in result and "choices" in result["output"]:
+                    # 某些版本的API可能使用choices格式
+                    return result["output"]["choices"][0]["message"]["content"]
+                else:
+                    return f"API响应格式异常: {result}"
             else:
                 return f"API错误: {response.status_code} - {response.text}"
                 
