@@ -12,7 +12,7 @@
 
 2. 并行模型调用架构：
    - 同时调用多个大语言模型进行问题分析和解答
-   - 当前支持：qwen3 (通义千问) 和 deepseek-r1
+   - 当前支持：qwen3 (通义千问) 和 deepseek-r1 和 文心4.5
    - 架构设计支持后续扩展更多模型
    - 每个模型独立处理，避免相互影响
 
@@ -65,7 +65,7 @@ class ChemistryAnalysisChain:
         self.vision_config = MODEL_CONFIG.get('tongyi_vision', {})
         
         # 配置并行处理的模型列表
-        self.parallel_models = ['tongyi', 'deepseek']  # qwen3通过tongyi调用，deepseek-r1
+        self.parallel_models = ['tongyi', 'deepseek', 'qianfan']  # qwen3通过tongyi调用，deepseek-r1
         
         # 初始化线程池用于并行处理
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=len(self.parallel_models))
@@ -418,7 +418,7 @@ class ChemistryAnalysisChain:
         
         # 收集结果，增强错误处理
         try:
-            for future in concurrent.futures.as_completed(future_to_model, timeout=120):  # 2分钟超时
+            for future in concurrent.futures.as_completed(future_to_model, timeout=300):  # 5分钟超时
                 model_name = future_to_model[future]
                 try:
                     result = future.result(timeout=30)  # 单个任务30秒超时
@@ -526,56 +526,37 @@ class ChemistryAnalysisChain:
             }
     
     def _integrate_results(self, parallel_results: Dict[str, Dict[str, Any]], question: str) -> str:
-        """
-        整合多个模型的结果
-        
-        Args:
-            parallel_results: 并行处理结果
-            question: 原始问题
-            
-        Returns:
-            str: 整合后的最终答案
-        """
         try:
-            # 过滤出成功的结果
-            successful_results = {k: v for k, v in parallel_results.items() 
-                                if v.get('success', False) and v.get('answer', '').strip()}
-            
+            successful_results = {k: v for k, v in parallel_results.items() if v.get('success', False) and v.get('answer', '').strip()}
             if not successful_results:
                 return "所有模型处理失败，无法生成答案。"
-            
             if len(successful_results) == 1:
-                # 只有一个成功结果，直接返回
                 model_name, result = list(successful_results.items())[0]
                 return f"**{model_name} 模型回答：**\n\n{result['answer']}"
-            
-            # 多个结果需要整合
+            # 新增相似度检查以简化融合
+            from difflib import SequenceMatcher
+            answers = list(successful_results.values())
+            similarity = SequenceMatcher(None, answers[0]['answer'], answers[1]['answer']).ratio()
+            if similarity > 0.8:  # 如果相似度高，直接返回第一个
+                return f"**融合答案（模型答案相似）：**\n\n{answers[0]['answer']}"
+            # 否则进行正常融合
             self.logger.info(f"[结果整合] 开始整合 {len(successful_results)} 个模型的结果")
-            
-            # 构建整合提示
             integration_prompt = f"""
-你是一个化学专家，现在需要整合多个AI模型对同一化学问题的回答，生成一个最优的综合答案。
-
-原始问题：{question}
-
-各模型回答：
-"""
-            
+    你是一个化学专家，现在需要整合多个AI模型对同一化学问题的回答，生成一个最优的综合答案。
+    原始问题：{question}
+    各模型回答：
+    """
             for model_name, result in successful_results.items():
                 integration_prompt += f"\n**{model_name} 模型回答：**\n{result['answer']}\n\n---\n"
-            
             integration_prompt += """
-请基于以上多个模型的回答，生成一个综合的、最优的答案。要求：
-1. 整合各模型的优点，去除重复内容
-2. 确保科学准确性
-3. 保持逻辑清晰和结构完整
-4. 如果模型间有分歧，请指出并给出最合理的解释
-5. 使用LaTeX格式表示化学公式
-
-综合答案：
-"""
-            
-            # 使用最佳可用模型进行整合
+    请基于以上多个模型的回答，生成一个综合的、最优的答案。要求：
+    1. 整合各模型的优点，去除重复内容
+    2. 确保科学准确性
+    3. 保持逻辑清晰和结构完整
+    4. 如果模型间有分歧，请指出并给出最合理的解释
+    5. 使用LaTeX格式表示化学公式
+    综合答案：
+    """
             integration_model = self._select_best_model(['tongyi', 'deepseek', 'zhipu'])
             if integration_model:
                 messages = [HumanMessage(content=integration_prompt)]
@@ -589,7 +570,6 @@ class ChemistryAnalysisChain:
                 first_model, first_result = list(successful_results.items())[0]
                 from utils.output_cleaner import clean_output
                 return clean_output(f"**{first_model} 模型回答：**\n\n{first_result['answer']}")
-                
         except Exception as e:
             self.logger.error(f"[结果整合] 整合失败: {str(e)}")
             # 返回第一个可用结果

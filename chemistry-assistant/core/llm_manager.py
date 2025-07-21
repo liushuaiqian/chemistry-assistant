@@ -15,6 +15,7 @@ from langchain_community.chat_models import ChatTongyi
 from langchain_core.language_models.chat_models import BaseChatModel
 from config import MODEL_CONFIG
 from utils.output_cleaner import clean_output, clean_model_output
+from langchain_community.chat_models import QianfanChatEndpoint
 
 class LLMManager:
     """
@@ -75,6 +76,17 @@ class LLMManager:
                     max_tokens=2000
                 )
                 self.logger.info("DeepSeek模型初始化成功")
+            
+            # 初始化Qianfan模型
+            if 'qianfan' in MODEL_CONFIG and MODEL_CONFIG['qianfan'].get('api_key'):
+                self.models['qianfan'] = ChatOpenAI(
+                    api_key=MODEL_CONFIG['qianfan']['api_key'],
+                    base_url='https://qianfan.baidubce.com/v2/',
+                    model=MODEL_CONFIG['qianfan'].get('model', 'ernie-4.5-turbo-128k'),
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+                self.logger.info("Qianfan模型初始化成功")
                 
         except Exception as e:
             self.logger.error(f"模型初始化失败: {str(e)}")

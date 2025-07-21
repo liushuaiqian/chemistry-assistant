@@ -53,7 +53,12 @@ MODEL_CONFIG = {
         'model': 'glm-4-plus',
     },
     
-    # 向量嵌入模型
+    # 文心4.5
+    'qianfan': {
+        'api_key': 'bce-v3/ALTAK-DqIxHUg2AELWWq5FxTKzj/9c9ed9c7be093b8232b927ff134341bd3b0e3ec2',
+        'model': 'ernie-4.5-turbo-128k',
+    },
+    # 嵌入模型
     'embedding': {
         'model_name': 'bge-large-zh-v1.5',  # 本地模型名称（备用）
         'device': 'cpu',
