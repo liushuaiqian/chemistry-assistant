@@ -8,7 +8,12 @@
 
 import requests
 import json
+import time
+from typing import Dict, Any, List, Optional
 from config import EXTERNAL_API_CONFIG
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class KnowledgeAPI:
     """
@@ -21,6 +26,13 @@ class KnowledgeAPI:
         初始化知识API
         """
         self.pubchem_base_url = EXTERNAL_API_CONFIG['pubchem']['base_url']
+        
+        # Metaso知识库API配置
+        self.metaso_config = EXTERNAL_API_CONFIG.get('metaso', {})
+        self.metaso_url = self.metaso_config.get('base_url', '')
+        self.metaso_api_key = self.metaso_config.get('api_key', '')
+        self.metaso_topic_id = self.metaso_config.get('search_topic_id', '')
+        self.metaso_timeout = self.metaso_config.get('timeout', 30)
     
     def get_compound_info(self, compound):
         """
@@ -218,3 +230,190 @@ class KnowledgeAPI:
                 'name': element,
                 'error': f'获取信息时出错: {str(e)}'
             }
+    
+    def search_knowledge_base(self, question: str) -> Dict[str, Any]:
+        """
+        搜索Metaso知识库
+        
+        Args:
+            question (str): 要搜索的问题
+            
+        Returns:
+            dict: 搜索结果，包含答案和参考文献
+        """
+        if not self.metaso_url or not self.metaso_api_key or not self.metaso_topic_id:
+            logger.warning("Metaso API配置不完整，无法进行知识库搜索")
+            return {
+                'success': False,
+                'error': 'Metaso API配置不完整',
+                'answer': '',
+                'references': []
+            }
+        
+        try:
+            # 准备请求参数
+            params = {
+                'question': question,
+                'searchTopicId': self.metaso_topic_id
+            }
+            
+            # 准备请求头
+            headers = {
+                'Authorization': f'Bearer {self.metaso_api_key}',
+                'Content-Type': 'application/json',
+                'Connection': 'keep-alive'
+            }
+            
+            logger.info(f"正在搜索Metaso知识库: {question[:50]}...")
+            
+            # 发送POST请求
+            response = requests.post(
+                self.metaso_url,
+                data=json.dumps(params),
+                headers=headers,
+                timeout=self.metaso_timeout
+            )
+            
+            # 检查响应状态
+            if response.status_code != 200:
+                logger.error(f"Metaso API请求失败，状态码: {response.status_code}")
+                return {
+                    'success': False,
+                    'error': f'API请求失败，状态码: {response.status_code}',
+                    'answer': '',
+                    'references': []
+                }
+            
+            # 解析响应
+            result = response.json()
+            
+            # 检查API返回的错误码
+            if result.get('errCode', 0) != 0:
+                error_msg = result.get('errMsg', '未知错误')
+                logger.error(f"Metaso API返回错误: {error_msg}")
+                return {
+                    'success': False,
+                    'error': f'API返回错误: {error_msg}',
+                    'answer': '',
+                    'references': []
+                }
+            
+            # 提取数据
+            data = result.get('data', {})
+            answer = data.get('text', '')
+            references = data.get('references', [])
+            result_id = data.get('resultId', '')
+            session_id = data.get('sessionId', '')
+            balance = data.get('balance', 0)
+            
+            logger.info(f"Metaso知识库搜索成功，获得{len(references)}个参考文献")
+            
+            # 格式化参考文献
+            formatted_references = []
+            for ref in references:
+                formatted_ref = {
+                    'title': ref.get('title', ''),
+                    'author': ref.get('author', ''),
+                    'article_type': ref.get('article_type', ''),
+                    'page': ref.get('page', 0),
+                    'total_page': ref.get('total_page', 0),
+                    'publish_date': ref.get('publish_date', ''),
+                    'file_type': ref.get('file_meta', {}).get('type', ''),
+                    'file_url': ref.get('file_meta', {}).get('url', ''),
+                    'refer_id': ref.get('display', {}).get('refer_id', 0)
+                }
+                formatted_references.append(formatted_ref)
+            
+            return {
+                'success': True,
+                'answer': answer,
+                'references': formatted_references,
+                'result_id': result_id,
+                'session_id': session_id,
+                'balance': balance,
+                'question': question
+            }
+            
+        except requests.exceptions.Timeout:
+            logger.error(f"Metaso API请求超时（{self.metaso_timeout}秒）")
+            return {
+                'success': False,
+                'error': f'请求超时（{self.metaso_timeout}秒）',
+                'answer': '',
+                'references': []
+            }
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Metaso API请求异常: {str(e)}")
+            return {
+                'success': False,
+                'error': f'请求异常: {str(e)}',
+                'answer': '',
+                'references': []
+            }
+        except json.JSONDecodeError as e:
+            logger.error(f"Metaso API响应解析失败: {str(e)}")
+            return {
+                'success': False,
+                'error': f'响应解析失败: {str(e)}',
+                'answer': '',
+                'references': []
+            }
+        except Exception as e:
+            logger.error(f"Metaso知识库搜索出错: {str(e)}")
+            return {
+                'success': False,
+                'error': f'搜索出错: {str(e)}',
+                'answer': '',
+                'references': []
+            }
+    
+    def get_comprehensive_info(self, query: str) -> Dict[str, Any]:
+        """
+        获取综合信息，结合多个知识源
+        
+        Args:
+            query (str): 查询内容
+            
+        Returns:
+            dict: 综合信息结果
+        """
+        result = {
+            'query': query,
+            'metaso_result': None,
+            'pubchem_result': None,
+            'combined_answer': '',
+            'all_references': []
+        }
+        
+        # 首先尝试Metaso知识库搜索
+        metaso_result = self.search_knowledge_base(query)
+        result['metaso_result'] = metaso_result
+        
+        if metaso_result.get('success'):
+            result['combined_answer'] = metaso_result.get('answer', '')
+            result['all_references'].extend(metaso_result.get('references', []))
+        
+        # 如果查询看起来像化合物名称，也尝试PubChem
+        if any(keyword in query.lower() for keyword in ['化合物', '分子', '化学式', '摩尔质量', '分子量']):
+            # 尝试提取化合物名称
+            compound_keywords = ['甲烷', '乙烷', '苯', '水', 'H2O', 'CH4', 'C2H6', 'C6H6']
+            for keyword in compound_keywords:
+                if keyword in query:
+                    pubchem_result = self.get_compound_info(keyword)
+                    if pubchem_result and 'error' not in pubchem_result:
+                        result['pubchem_result'] = pubchem_result
+                        # 将PubChem信息添加到综合答案中
+                        if result['combined_answer']:
+                            result['combined_answer'] += '\n\n### 补充化合物信息（来自PubChem）:\n'
+                        else:
+                            result['combined_answer'] = '### 化合物信息（来自PubChem）:\n'
+                        
+                        if 'molecular_formula' in pubchem_result:
+                            result['combined_answer'] += f"分子式: {pubchem_result['molecular_formula']}\n"
+                        if 'molar_mass' in pubchem_result:
+                            result['combined_answer'] += f"摩尔质量: {pubchem_result['molar_mass']} g/mol\n"
+                        if 'iupac_name' in pubchem_result:
+                            result['combined_answer'] += f"IUPAC名称: {pubchem_result['iupac_name']}\n"
+                    break
+        
+        return result

@@ -79,6 +79,12 @@ KNOWLEDGE_CONFIG = {
 EXTERNAL_API_CONFIG = {
     'pubchem': {
         'base_url': 'https://pubchem.ncbi.nlm.nih.gov/rest/pug',
+    },
+    'metaso': {
+        'base_url': 'https://metaso.cn/api/open/search/v2',
+        'api_key': 'mk-3751176E6B379BB3C57E79BCB513BD33',
+        'search_topic_id': '8640179836073414656',
+        'timeout': 50,  # 请求超时时间（秒）
     }
 }
 

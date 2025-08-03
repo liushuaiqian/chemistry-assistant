@@ -11,6 +11,7 @@ from .task_router import TaskRouter
 from .multimodal_processor import MultimodalProcessor
 from .llm_manager import LLMManager
 from .chemistry_chain import ChemistryAnalysisChain
+from tools.knowledge_api import KnowledgeAPI
 
 class Controller:
     """
@@ -48,6 +49,11 @@ class Controller:
             self.logger.info("初始化多模态处理器...")
             self.multimodal_processor = MultimodalProcessor()
             self.logger.info("多模态处理器初始化成功")
+            
+            # 初始化知识库API
+            self.logger.info("初始化知识库API...")
+            self.knowledge_api = KnowledgeAPI()
+            self.logger.info("知识库API初始化成功")
             
             # 初始化Agent管理器（暂时跳过知识库相关功能）
             self.logger.info("初始化Agent管理器...")
@@ -387,7 +393,110 @@ class Controller:
                 self.logger.error(f"[LangChain处理] 处理过程中发生异常: {str(e)}")
                 import traceback
                 self.logger.error(f"[LangChain处理] 异常堆栈: {traceback.format_exc()}")
-                return f"LangChain处理失败: {str(e)}", "", {}
+                return f"处理过程中发生异常: {str(e)}", "", {}
+    
+    def search_external_knowledge(self, query: str) -> dict:
+        """
+        搜索外部知识库
+        
+        Args:
+            query (str): 搜索查询
+            
+        Returns:
+            dict: 搜索结果
+        """
+        try:
+            self.logger.info(f"开始搜索外部知识库: {query[:50]}...")
+            
+            # 使用Metaso知识库搜索
+            result = self.knowledge_api.search_knowledge_base(query)
+            
+            if result.get('success'):
+                self.logger.info(f"外部知识库搜索成功，获得答案长度: {len(result.get('answer', ''))}")
+                return {
+                    'success': True,
+                    'source': 'metaso_knowledge_base',
+                    'answer': result.get('answer', ''),
+                    'references': result.get('references', []),
+                    'result_id': result.get('result_id', ''),
+                    'session_id': result.get('session_id', ''),
+                    'balance': result.get('balance', 0)
+                }
+            else:
+                self.logger.warning(f"外部知识库搜索失败: {result.get('error', '未知错误')}")
+                return {
+                    'success': False,
+                    'source': 'metaso_knowledge_base',
+                    'error': result.get('error', '未知错误'),
+                    'answer': '',
+                    'references': []
+                }
+                
+        except Exception as e:
+            self.logger.error(f"外部知识库搜索异常: {str(e)}")
+            return {
+                'success': False,
+                'source': 'metaso_knowledge_base',
+                'error': f'搜索异常: {str(e)}',
+                'answer': '',
+                'references': []
+            }
+    
+    def get_comprehensive_knowledge(self, query: str) -> dict:
+        """
+        获取综合知识信息，结合多个知识源
+        
+        Args:
+            query (str): 查询内容
+            
+        Returns:
+            dict: 综合知识结果
+        """
+        try:
+            self.logger.info(f"开始获取综合知识信息: {query[:50]}...")
+            
+            # 使用知识API获取综合信息
+            result = self.knowledge_api.get_comprehensive_info(query)
+            
+            # 格式化返回结果
+            formatted_result = {
+                'success': True,
+                'query': query,
+                'combined_answer': result.get('combined_answer', ''),
+                'sources': []
+            }
+            
+            # 添加Metaso知识库结果
+            metaso_result = result.get('metaso_result')
+            if metaso_result and metaso_result.get('success'):
+                formatted_result['sources'].append({
+                    'name': 'Metaso知识库',
+                    'answer': metaso_result.get('answer', ''),
+                    'references': metaso_result.get('references', []),
+                    'result_id': metaso_result.get('result_id', ''),
+                    'balance': metaso_result.get('balance', 0)
+                })
+            
+            # 添加PubChem结果
+            pubchem_result = result.get('pubchem_result')
+            if pubchem_result and 'error' not in pubchem_result:
+                formatted_result['sources'].append({
+                    'name': 'PubChem数据库',
+                    'compound_info': pubchem_result
+                })
+            
+            self.logger.info(f"综合知识信息获取成功，包含{len(formatted_result['sources'])}个知识源")
+            return formatted_result
+            
+        except Exception as e:
+            self.logger.error(f"获取综合知识信息异常: {str(e)}")
+            return {
+                'success': False,
+                'query': query,
+                'error': f'获取信息异常: {str(e)}',
+                'combined_answer': '',
+                'sources': []
+            }
         else:
             # 使用传统多模态处理器
             self.logger.info("[LangChain处理] 使用传统多模态处理器")
