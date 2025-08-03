@@ -18,12 +18,18 @@ class Controller:
     负责接收用户查询并协调各个Agent的工作
     """
     
-    def __init__(self):
+    def __init__(self, use_reranker=True, enable_adaptive=True):
         """
         初始化控制器
+        
+        Args:
+            use_reranker (bool): 是否启用文本排序器进行双阶段检索
+            enable_adaptive (bool): 是否启用自适应检索
         """
         import logging
         self.logger = logging.getLogger(__name__)
+        self.use_reranker = use_reranker
+        self.enable_adaptive = enable_adaptive
         
         try:
             self.logger.info("开始初始化Controller组件...")
@@ -33,9 +39,9 @@ class Controller:
             self.llm_manager = LLMManager()
             self.logger.info("LLM管理器初始化成功")
             
-            # 初始化化学分析链
+            # 初始化化学分析链，支持双阶段检索和自适应检索
             self.logger.info("初始化化学分析链...")
-            self.chemistry_chain = ChemistryAnalysisChain()
+            self.chemistry_chain = ChemistryAnalysisChain(use_reranker=use_reranker, enable_adaptive=enable_adaptive)
             self.logger.info("化学分析链初始化成功")
             
             # 初始化多模态处理器
@@ -119,6 +125,172 @@ class Controller:
             # 对于纯文本输入，也使用多模态处理器
             response, comparison = self.multimodal_processor.process_input(query, 'text')
             return response, comparison
+    
+    async def process_with_adaptive_retrieval(self, question: str, user_feedback: dict = None) -> dict:
+        """
+        使用自适应检索处理问题
+        
+        Args:
+            question (str): 用户问题
+            user_feedback (dict): 用户反馈，用于策略调整
+        
+        Returns:
+            dict: 处理结果
+        """
+        try:
+            self.logger.info(f"开始自适应检索处理: {question[:50]}...")
+            
+            if self.enable_adaptive:
+                result = await self.chemistry_chain.process_with_adaptive_retrieval(question, user_feedback)
+                
+                self.logger.info(f"自适应检索完成，策略: {result.get('retrieval_info', {}).get('strategy_used', 'unknown')}")
+                return {
+                    'success': True,
+                    'answer': result['answer'],
+                    'retrieval_info': result['retrieval_info'],
+                    'processing_info': {
+                        'method': 'adaptive_retrieval',
+                        'parallel_models_used': list(result.get('parallel_results', {}).keys()),
+                        'context_length': len(result.get('context_used', ''))
+                    }
+                }
+            else:
+                # 降级到传统处理
+                self.logger.info("自适应检索未启用，使用传统处理")
+                result = self.process_query(question)
+                return {
+                    'success': True,
+                    'answer': result[0] if isinstance(result, tuple) else result,
+                    'retrieval_info': {'strategy_used': 'traditional', 'note': '自适应检索未启用'},
+                    'processing_info': {'method': 'traditional'}
+                }
+                
+        except Exception as e:
+            self.logger.error(f"自适应检索处理失败: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'answer': f"处理过程中出现错误: {str(e)}",
+                'retrieval_info': {'strategy_used': 'error'},
+                'processing_info': {'method': 'error_fallback'}
+            }
+    
+    def analyze_query_complexity(self, question: str) -> dict:
+        """
+        分析查询复杂度
+        
+        Args:
+            question (str): 用户问题
+        
+        Returns:
+            dict: 复杂度分析结果
+        """
+        try:
+            self.logger.info(f"分析查询复杂度: {question[:50]}...")
+            
+            if self.enable_adaptive:
+                analysis = self.chemistry_chain.analyze_query_complexity(question)
+                self.logger.info(f"复杂度分析完成: {analysis.get('complexity', 'unknown')}")
+                return {
+                    'success': True,
+                    'analysis': analysis
+                }
+            else:
+                return {
+                    'success': False,
+                    'message': '自适应检索功能未启用',
+                    'analysis': {
+                        'complexity': 'unknown',
+                        'score': 0.5,
+                        'reasoning': '自适应检索功能未启用',
+                        'recommended_strategy': 'traditional_retrieval'
+                    }
+                }
+                
+        except Exception as e:
+            self.logger.error(f"复杂度分析失败: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'analysis': {
+                    'complexity': 'error',
+                    'score': 0.0,
+                    'reasoning': f'分析过程出错: {str(e)}',
+                    'recommended_strategy': 'fallback'
+                }
+            }
+    
+    def get_adaptive_performance_report(self) -> dict:
+        """
+        获取自适应检索性能报告
+        
+        Returns:
+            dict: 性能报告
+        """
+        try:
+            if self.enable_adaptive:
+                report = self.chemistry_chain.get_adaptive_performance_report()
+                return {
+                    'success': True,
+                    'report': report
+                }
+            else:
+                return {
+                    'success': False,
+                    'message': '自适应检索功能未启用',
+                    'report': {}
+                }
+                
+        except Exception as e:
+            self.logger.error(f"获取性能报告失败: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'report': {}
+            }
+    
+    def get_system_info(self) -> dict:
+        """
+        获取系统信息
+        
+        Returns:
+            dict: 系统配置和状态信息
+        """
+        try:
+            return {
+                'controller_status': 'active',
+                'llm_manager': self.llm_manager.get_manager_info() if hasattr(self.llm_manager, 'get_manager_info') else 'available',
+                'chemistry_chain': self.chemistry_chain.get_chain_info() if hasattr(self.chemistry_chain, 'get_chain_info') else 'available',
+                'reranker_enabled': self.use_reranker,
+                'adaptive_enabled': self.enable_adaptive,
+                'available_functions': [
+                    'process_query',
+                    'process_with_chain', 
+                    'process_multimodal_input',
+                    'process_with_adaptive_retrieval',
+                    'analyze_query_complexity',
+                    'get_adaptive_performance_report',
+                    'get_system_info'
+                ],
+                'supported_features': [
+                    '多模型并行处理',
+                    '视觉识别',
+                    'RAG检索',
+                    '双阶段检索' if self.use_reranker else '传统检索',
+                    '自适应检索' if self.enable_adaptive else '固定策略检索',
+                    '查询复杂度分析' if self.enable_adaptive else '基础查询处理',
+                    '化学计算',
+                    '错误恢复'
+                ]
+            }
+        except Exception as e:
+            self.logger.error(f"获取系统信息失败: {e}")
+            return {
+                'controller_status': 'error',
+                'error': str(e),
+                'available_functions': [],
+                'supported_features': []
+            }
     
     def get_available_agents(self):
         """

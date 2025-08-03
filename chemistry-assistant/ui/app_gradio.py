@@ -225,18 +225,18 @@ def start_ui(controller=None):
     启动Gradio Web界面
     """
     
-    def process_question(question, function_choice, image=None, progress=gr.Progress()):
+    def process_question(question, function_choice, image=None, adaptive_enabled=False, show_complexity=True, show_strategy=True, progress=gr.Progress()):
         """处理用户问题，带加载状态"""
         progress(0, desc="开始处理...")
         time.sleep(0.5)  # 给进度条显示时间
     
         if not question.strip() and image is None:
             progress(1, desc="处理完成")
-            return "请输入问题或上传图片", "", ""
+            return "请输入问题或上传图片", "", "", ""
     
         if controller is None:
             progress(1, desc="处理完成")
-            return "演示模式，请通过 main.py 启动完整系统。", "", ""
+            return "演示模式，请通过 main.py 启动完整系统。", "", "", ""
     
         # 构建任务信息
         task_info = {
@@ -250,7 +250,45 @@ def start_ui(controller=None):
     
         try:
             progress(0.3, desc="正在处理问题...")
-            if function_choice == "LangChain处理":
+            
+            # 自适应检索处理
+            if function_choice == "自适应检索" or adaptive_enabled:
+                progress(0.4, desc="正在进行自适应检索...")
+                import asyncio
+                result = asyncio.run(controller.process_with_adaptive_retrieval(question))
+                
+                if result.get('success'):
+                    answer = result['answer']
+                    comp = ""
+                    chain = ""
+                    
+                    # 构建自适应检索信息
+                    adaptive_info = []
+                    retrieval_info = result.get('retrieval_info', {})
+                    
+                    if show_strategy and retrieval_info:
+                        strategy_used = retrieval_info.get('strategy_used', 'unknown')
+                        adaptive_info.append(f"**🎯 使用策略**: {strategy_used}")
+                        
+                        if 'execution_time' in retrieval_info:
+                            adaptive_info.append(f"**⏱️ 执行时间**: {retrieval_info['execution_time']:.2f}秒")
+                        
+                        if 'documents_retrieved' in retrieval_info:
+                            adaptive_info.append(f"**📄 检索文档数**: {retrieval_info['documents_retrieved']}")
+                    
+                    if show_complexity and retrieval_info.get('complexity_analysis'):
+                        analysis = retrieval_info['complexity_analysis']
+                        adaptive_info.append(f"**🧠 查询复杂度**: {analysis.get('complexity', 'unknown')} (分数: {analysis.get('score', 0):.2f})")
+                        adaptive_info.append(f"**💭 分析原因**: {analysis.get('reasoning', '无')}")
+                    
+                    if adaptive_info:
+                        chain = "\n\n---\n\n### 🔍 自适应检索信息\n\n" + "\n\n".join(adaptive_info)
+                else:
+                    answer = result.get('answer', '自适应检索处理失败')
+                    comp = f"错误信息: {result.get('error', '未知错误')}"
+                    chain = ""
+                    
+            elif function_choice == "LangChain处理":
                 response, comparison, chain_result = controller.process_with_chain(
                     question,
                     function_type="智能问答",
@@ -270,16 +308,24 @@ def start_ui(controller=None):
             cleaned_answer = clean_and_format_output(answer)
             cleaned_comparison = clean_and_format_output(comp)
             cleaned_chain_result = clean_and_format_output(chain)
+            
+            # 构建自适应检索状态信息
+            adaptive_status = ""
+            if function_choice == "自适应检索" or adaptive_enabled:
+                if hasattr(controller, 'enable_adaptive') and controller.enable_adaptive:
+                    adaptive_status = "✅ 自适应检索已启用"
+                else:
+                    adaptive_status = "⚠️ 自适应检索功能未在系统中启用，使用传统处理模式"
 
             # 保存对话历史
             ConversationManager.add_conversation(question, cleaned_answer, function_choice, bool(image))
 
             progress(1, desc="处理完成")
-            return cleaned_answer, cleaned_comparison, cleaned_chain_result
+            return cleaned_answer, cleaned_comparison, cleaned_chain_result, adaptive_status
         except Exception as e:
             logger.error(f"处理问题时发生错误: {e}", exc_info=True)
             progress(1, desc="处理失败")
-            return f"处理过程中发生错误: {e}", "", ""
+            return f"处理过程中发生错误: {e}", "", "", "❌ 处理失败"
 
     def on_clear_conversation():
         if not question.strip() and image is None:
@@ -388,11 +434,29 @@ def start_ui(controller=None):
             with gr.Column(scale=1):
                 gr.Markdown("### 设置")
                 function_choice = gr.Radio(
-                    choices=["智能问答", "化学计算", "信息检索", "LangChain处理"],
+                    choices=["智能问答", "化学计算", "信息检索", "LangChain处理", "自适应检索"],
                     value="智能问答",
                     label="功能类型",
                     info="选择要使用的功能"
                 )
+                
+                # 自适应检索相关设置
+                with gr.Accordion("🔧 自适应检索设置", open=False, visible=True) as adaptive_settings:
+                    adaptive_enabled = gr.Checkbox(
+                        label="启用自适应检索",
+                        value=False,
+                        info="根据查询复杂度动态调整检索策略"
+                    )
+                    show_complexity_analysis = gr.Checkbox(
+                        label="显示复杂度分析",
+                        value=True,
+                        info="显示查询复杂度分析结果"
+                    )
+                    show_strategy_info = gr.Checkbox(
+                        label="显示策略信息",
+                        value=True,
+                        info="显示使用的检索策略详情"
+                    )
             
             with gr.Column(scale=3):
                 gr.Markdown("### 对话界面")
@@ -402,7 +466,18 @@ def start_ui(controller=None):
                 answer_output = gr.Markdown(label="回答")
                 comparison_output = gr.Markdown(label="模型答案对比分析")
                 chain_result_output = gr.Markdown(label="LangChain链式分析结果")
+                adaptive_status_output = gr.Textbox(label="自适应检索状态", interactive=False, lines=1)
                 clear_btn = gr.Button("清除当前对话")
+                
+                # 自适应检索工具按钮
+                with gr.Row():
+                    analyze_complexity_btn = gr.Button("🧠 分析查询复杂度", variant="secondary", size="sm")
+                    get_performance_btn = gr.Button("📊 获取性能报告", variant="secondary", size="sm")
+                
+                # 复杂度分析和性能报告显示区域
+                with gr.Accordion("🔍 自适应检索详细信息", open=False):
+                    complexity_analysis_output = gr.Markdown(label="复杂度分析结果")
+                    performance_report_output = gr.Markdown(label="性能报告")
 
         with gr.Column(scale=1):
             gr.Markdown("### 📚 历史对话管理")
@@ -665,33 +740,98 @@ def start_ui(controller=None):
             **技术**: 多Agent架构，支持本地模型、外部API和LangChain
             """)
         
+        # 自适应检索相关处理函数
+        def analyze_query_complexity(question):
+            """分析查询复杂度"""
+            if not question.strip():
+                return "请输入要分析的问题"
+            
+            if controller is None:
+                return "演示模式，无法使用此功能"
+            
+            try:
+                result = controller.analyze_query_complexity(question)
+                if result.get('success'):
+                    analysis = result['analysis']
+                    return f"""### 🧠 查询复杂度分析
+
+**复杂度等级**: {analysis.get('complexity', 'unknown')}
+**复杂度分数**: {analysis.get('score', 0):.2f}
+**推荐策略**: {analysis.get('recommended_strategy', 'unknown')}
+**分析原因**: {analysis.get('reasoning', '无')}
+
+---
+
+**查询内容**: {question}"""
+                else:
+                    return f"分析失败: {result.get('error', '未知错误')}"
+            except Exception as e:
+                return f"分析过程中发生错误: {str(e)}"
+        
+        def get_performance_report():
+            """获取自适应检索性能报告"""
+            if controller is None:
+                return "演示模式，无法使用此功能"
+            
+            try:
+                result = controller.get_adaptive_performance_report()
+                if result.get('success'):
+                    report = result['report']
+                    return f"""### 📊 自适应检索性能报告
+
+**总查询数**: {report.get('total_queries', 0)}
+**平均响应时间**: {report.get('avg_response_time', 0):.2f}秒
+
+**策略使用统计**:
+{chr(10).join([f"- {strategy}: {count}次" for strategy, count in report.get('strategy_usage', {}).items()])}
+
+**系统状态**: {'正常运行' if report.get('total_queries', 0) > 0 else '暂无查询记录'}"""
+                else:
+                    return f"获取报告失败: {result.get('error', '未知错误')}"
+            except Exception as e:
+                return f"获取报告过程中发生错误: {str(e)}"
+        
         # 主要功能事件绑定
-        def submit_and_refresh(question, function_choice, image):
+        def submit_and_refresh(question, function_choice, image, adaptive_enabled, show_complexity, show_strategy):
             """提交问题并刷新历史记录"""
             # 处理问题
-            answer, comparison, chain_result = process_question(question, function_choice, image)
+            answer, comparison, chain_result, adaptive_status = process_question(
+                question, function_choice, image, adaptive_enabled, show_complexity, show_strategy
+            )
             
             # 刷新历史记录和统计
             new_choices = update_history_list()
             new_stats = update_stats()
             
-            return answer, comparison, chain_result, new_choices, new_stats
+            return answer, comparison, chain_result, adaptive_status, new_choices, new_stats
 
         submit_btn.click(
             fn=submit_and_refresh,
-            inputs=[question_input, function_choice, image_input],
-            outputs=[answer_output, comparison_output, chain_result_output, history_list, stats_display]
+            inputs=[question_input, function_choice, image_input, adaptive_enabled, show_complexity_analysis, show_strategy_info],
+            outputs=[answer_output, comparison_output, chain_result_output, adaptive_status_output, history_list, stats_display]
         )
         
         question_input.submit(
             fn=submit_and_refresh,
-            inputs=[question_input, function_choice, image_input],
-            outputs=[answer_output, comparison_output, chain_result_output, history_list, stats_display]
+            inputs=[question_input, function_choice, image_input, adaptive_enabled, show_complexity_analysis, show_strategy_info],
+            outputs=[answer_output, comparison_output, chain_result_output, adaptive_status_output, history_list, stats_display]
+        )
+        
+        # 自适应检索工具按钮事件
+        analyze_complexity_btn.click(
+            fn=analyze_query_complexity,
+            inputs=[question_input],
+            outputs=[complexity_analysis_output]
+        )
+        
+        get_performance_btn.click(
+            fn=get_performance_report,
+            outputs=[performance_report_output]
         )
         
         clear_btn.click(
-            fn=lambda: ("", None, "", "", "", "🧹 当前对话已清除"),
-            outputs=[question_input, image_input, answer_output, comparison_output, chain_result_output, history_status]
+            fn=lambda: ("", None, "", "", "", "", "", "", "🧹 当前对话已清除"),
+            outputs=[question_input, image_input, answer_output, comparison_output, chain_result_output, adaptive_status_output, complexity_analysis_output, performance_report_output, history_status]
         )
         
         example_btns[0].click(lambda: "计算H2O的摩尔质量", outputs=question_input)

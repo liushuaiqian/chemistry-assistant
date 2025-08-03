@@ -53,13 +53,21 @@ class ChemistryAnalysisChain:
     实现多模态输入处理和并行模型调用
     """
     
-    def __init__(self):
+    def __init__(self, use_reranker=True, enable_adaptive=True):
         """
         初始化化学分析链
+        
+        Args:
+            use_reranker (bool): 是否启用文本排序器进行双阶段检索
+            enable_adaptive (bool): 是否启用自适应检索
         """
         self.logger = logging.getLogger(__name__)
         self.llm_manager = LLMManager()
-        self.rag_retriever = RAGRetriever()
+        
+        # 初始化RAG检索器，支持双阶段检索和自适应检索
+        self.rag_retriever = RAGRetriever(use_reranker=use_reranker, enable_adaptive=enable_adaptive)
+        self.use_reranker = use_reranker
+        self.enable_adaptive = enable_adaptive
         
         # 初始化视觉模型配置
         self.vision_config = MODEL_CONFIG.get('tongyi_vision', {})
@@ -72,6 +80,20 @@ class ChemistryAnalysisChain:
         
         self._setup_prompts()
         self._setup_chains()
+        
+        # 记录排序器和自适应检索状态
+        reranker_info = self.rag_retriever.get_reranker_info()
+        adaptive_info = self.rag_retriever.get_adaptive_info()
+        
+        if adaptive_info['enabled'] and adaptive_info['available']:
+            self.logger.info("化学分析链已启用自适应检索系统")
+            if reranker_info['enabled'] and reranker_info['available']:
+                self.logger.info("- 双阶段检索（向量检索+文本排序）已启用")
+            self.logger.info(f"- 支持策略: {', '.join(adaptive_info['supported_strategies'])}")
+        elif reranker_info['enabled'] and reranker_info['available']:
+            self.logger.info("化学分析链已启用双阶段检索（向量检索+文本排序）")
+        else:
+            self.logger.info("化学分析链使用传统向量检索模式")
     
     def _setup_prompts(self):
         """
@@ -469,7 +491,7 @@ class ChemistryAnalysisChain:
     
     def _single_model_process(self, model_name: str, question: str) -> Dict[str, Any]:
         """
-        单个模型的处理逻辑
+        单个模型的处理逻辑，集成RAG检索功能
         
         Args:
             model_name: 模型名称
@@ -484,8 +506,47 @@ class ChemistryAnalysisChain:
         try:
             self.logger.info(f"[{model_name}] 开始处理问题")
             
-            # 构建专门的化学问题处理提示
-            prompt = f"""
+            # 使用RAG检索相关知识
+            rag_context = ""
+            try:
+                # 使用综合检索功能，同时从教材和题库检索
+                retrieved_docs = self.rag_retriever.retrieve_comprehensive(
+                    query=question,
+                    textbook_k=3,
+                    question_k=2,
+                    rerank_top_n=4
+                )
+                
+                if retrieved_docs:
+                    rag_context = "\n\n".join(retrieved_docs[:4])  # 限制上下文长度
+                    self.logger.info(f"[{model_name}] RAG检索到{len(retrieved_docs)}个相关文档")
+                else:
+                    self.logger.info(f"[{model_name}] RAG检索未找到相关文档")
+                    
+            except Exception as rag_error:
+                self.logger.warning(f"[{model_name}] RAG检索失败: {str(rag_error)}")
+            
+            # 构建增强的化学问题处理提示
+            if rag_context:
+                prompt = f"""
+你是一个专业的化学助手，请根据以下背景知识详细分析并回答化学问题。
+
+背景知识：
+{rag_context}
+
+问题：{question}
+
+请基于背景知识提供：
+1. 问题分析和解题思路
+2. 详细的解答步骤
+3. 相关的化学原理和公式（使用LaTeX格式）
+4. 最终答案
+5. 解题要点总结
+
+如果背景知识不足以完全回答问题，请结合你的专业知识进行补充。请确保回答准确、完整、易懂。
+"""
+            else:
+                prompt = f"""
 你是一个专业的化学助手，请详细分析并回答以下化学问题。
 
 问题：{question}
@@ -511,7 +572,9 @@ class ChemistryAnalysisChain:
                 'answer': response,
                 'processing_time': processing_time,
                 'model_name': model_name,
-                'success': True
+                'success': True,
+                'rag_used': bool(rag_context),
+                'rag_docs_count': len(retrieved_docs) if 'retrieved_docs' in locals() else 0
             }
             
         except Exception as e:
@@ -522,7 +585,9 @@ class ChemistryAnalysisChain:
                 'answer': '',
                 'processing_time': processing_time,
                 'model_name': model_name,
-                'success': False
+                'success': False,
+                'rag_used': False,
+                'rag_docs_count': 0
             }
     
     def _integrate_results(self, parallel_results: Dict[str, Dict[str, Any]], question: str) -> str:
@@ -778,6 +843,137 @@ class ChemistryAnalysisChain:
         else:
             return str(result)
     
+    async def process_with_adaptive_retrieval(self, question: str, user_feedback: dict = None) -> Dict[str, Any]:
+        """
+        使用自适应检索处理问题
+        
+        Args:
+            question (str): 用户问题
+            user_feedback (dict): 用户反馈，用于策略调整
+        
+        Returns:
+            Dict[str, Any]: 处理结果，包含答案和检索信息
+        """
+        try:
+            if self.enable_adaptive and self.rag_retriever.enable_adaptive:
+                # 使用自适应检索
+                retrieval_result = await self.rag_retriever.adaptive_retrieve(question, user_feedback)
+                
+                # 构建增强的上下文
+                context = "\n\n".join(retrieval_result.documents) if retrieval_result.documents else "暂无相关资料"
+                
+                # 使用并行模型处理
+                parallel_results = self._parallel_model_call(question)
+                
+                # 整合结果
+                final_answer = self._integrate_results(parallel_results, question)
+                
+                return {
+                    'answer': final_answer,
+                    'retrieval_info': {
+                        'strategy_used': retrieval_result.strategy_used,
+                        'complexity_analysis': {
+                            'complexity': retrieval_result.complexity_analysis.complexity.value,
+                            'score': retrieval_result.complexity_analysis.score,
+                            'reasoning': retrieval_result.complexity_analysis.reasoning,
+                            'recommended_strategy': retrieval_result.complexity_analysis.recommended_strategy
+                        },
+                        'documents_found': len(retrieval_result.documents),
+                        'retrieval_steps': retrieval_result.retrieval_steps,
+                        'total_time': retrieval_result.total_time,
+                        'confidence_score': retrieval_result.confidence_score
+                    },
+                    'parallel_results': parallel_results,
+                    'context_used': context[:500] + "..." if len(context) > 500 else context
+                }
+            else:
+                # 降级到传统处理
+                return await self._process_traditional(question)
+                
+        except Exception as e:
+            self.logger.error(f"自适应检索处理错误: {e}")
+            # 降级到传统处理
+            return await self._process_traditional(question)
+    
+    async def _process_traditional(self, question: str) -> Dict[str, Any]:
+        """
+        传统处理方式（降级处理）
+        """
+        try:
+            # 传统RAG检索
+            context_docs = self.rag_retriever.retrieve_comprehensive(question)
+            context = "\n\n".join(context_docs) if context_docs else "暂无相关资料"
+            
+            # 并行模型处理
+            parallel_results = self._parallel_model_call(question)
+            
+            # 整合结果
+            final_answer = self._integrate_results(parallel_results, question)
+            
+            return {
+                'answer': final_answer,
+                'retrieval_info': {
+                    'strategy_used': 'traditional_retrieval',
+                    'documents_found': len(context_docs),
+                    'note': '使用传统检索模式'
+                },
+                'parallel_results': parallel_results,
+                'context_used': context[:500] + "..." if len(context) > 500 else context
+            }
+            
+        except Exception as e:
+            self.logger.error(f"传统处理也失败: {e}")
+            return {
+                'answer': f"处理过程中出现错误: {str(e)}",
+                'retrieval_info': {'strategy_used': 'error', 'error': str(e)},
+                'parallel_results': {},
+                'context_used': ''
+            }
+    
+    def analyze_query_complexity(self, question: str) -> Dict[str, Any]:
+        """
+        分析查询复杂度
+        
+        Args:
+            question (str): 用户问题
+        
+        Returns:
+            Dict[str, Any]: 复杂度分析结果
+        """
+        try:
+            complexity_analysis = self.rag_retriever.analyze_query_complexity(question)
+            
+            return {
+                'complexity': complexity_analysis.complexity.value,
+                'score': complexity_analysis.score,
+                'reasoning': complexity_analysis.reasoning,
+                'features': complexity_analysis.features,
+                'recommended_strategy': complexity_analysis.recommended_strategy,
+                'strategy_description': self.rag_retriever.adaptive_strategy.complexity_analyzer.get_strategy_description(
+                    complexity_analysis.recommended_strategy
+                ) if self.rag_retriever.adaptive_strategy else "策略描述不可用"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"复杂度分析错误: {e}")
+            return {
+                'complexity': 'moderate',
+                'score': 0.5,
+                'reasoning': f'分析过程出错: {str(e)}',
+                'features': {},
+                'recommended_strategy': 'traditional_retrieval',
+                'strategy_description': '传统检索'
+            }
+    
+    def get_adaptive_performance_report(self) -> Dict[str, Any]:
+        """
+        获取自适应检索性能报告
+        
+        Returns:
+            Dict[str, Any]: 性能报告
+        """
+        return self.rag_retriever.get_adaptive_performance_report()
+    
     def get_chain_info(self) -> Dict[str, Any]:
         """
         获取分析链信息
@@ -790,18 +986,32 @@ class ChemistryAnalysisChain:
             'description': '基于LangChain的多模态并行化学问题分析工具',
             'architecture': '多模态输入 → 并行模型调用 → 结果整合',
             'supported_models': self.parallel_models,
+            'parallel_models': self.parallel_models,
+            'vision_enabled': bool(self.vision_config),
+            'rag_enabled': self.rag_retriever is not None,
+            'reranker_info': self.rag_retriever.get_reranker_info() if self.rag_retriever else None,
+            'adaptive_info': self.rag_retriever.get_adaptive_info() if self.rag_retriever else None,
+            'available_llms': list(self.llm_manager.get_available_models().keys()),
+            'chain_type': 'parallel_processing_with_adaptive_retrieval' if self.enable_adaptive else 'parallel_processing',
+            'supports_multimodal': True,
+            'supports_vision': bool(self.vision_config),
+            'supports_rag': True,
+            'supports_parallel': True,
+            'supports_adaptive_retrieval': self.enable_adaptive,
             'features': [
                 '多模态输入处理（图片+文字）',
                 '并行模型调用（提高速度）',
                 '智能结果整合',
                 '模型对比分析',
                 '视觉识别支持',
-                '错误恢复机制'
+                '错误恢复机制',
+                '自适应检索策略'
             ],
             'advantages': [
                 '并行处理提高响应速度',
                 '多模型结果提高准确性',
                 '支持图片识别',
-                '模块化设计易扩展'
+                '模块化设计易扩展',
+                '自适应检索优化'
             ]
         }
