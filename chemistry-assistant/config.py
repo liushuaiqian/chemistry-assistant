@@ -85,6 +85,12 @@ EXTERNAL_API_CONFIG = {
         'api_key': 'mk-3751176E6B379BB3C57E79BCB513BD33',
         'search_topic_id': '8640179836073414656',
         'timeout': 50,  # 请求超时时间（秒）
+    },
+    'tongyi_knowledge_app': {
+        'api_key': 'sk-5a74911dfd884cc6abb87928f76f6994',
+        'app_id': 'b6f1b931e9c74a41bf605fe1e74fa634',
+        'pipeline_ids': ['elpzmshtgs', 'yjutc6uopj', '9881c0qpvj'],  # 知识库ID列表
+        'timeout': 30,  # 请求超时时间（秒）
     }
 }
 

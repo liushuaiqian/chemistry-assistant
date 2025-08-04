@@ -14,6 +14,7 @@ from config import KNOWLEDGE_CONFIG
 from models.embedding_model import EmbeddingModel
 from .text_reranker import TextReranker
 from .adaptive_retrieval_strategy import AdaptiveRetrievalStrategy
+from .knowledge_api import KnowledgeAPI
 
 class RAGRetriever:
     """
@@ -60,6 +61,10 @@ class RAGRetriever:
         else:
             self.adaptive_strategy = None
             print("使用传统检索模式（未启用自适应）")
+        
+        # 初始化知识API（包含通义百炼知识检索智能体）
+        self.knowledge_api = KnowledgeAPI()
+        print("知识API已初始化，支持通义百炼、Metaso和PubChem知识库")
 
     def _load_vector_store(self, name):
         index_path = os.path.join(self.vector_store_path, name)
@@ -467,4 +472,99 @@ class RAGRetriever:
                 'multi_round_retrieval',
                 'comprehensive_analysis_retrieval'
             ] if self.enable_adaptive else ['traditional_retrieval']
+        }
+    
+    def retrieve_with_external_knowledge(self, query: str, k: int = 5, include_tongyi: bool = True, include_metaso: bool = True, include_pubchem: bool = True):
+        """
+        结合外部知识库的综合检索
+        
+        Args:
+            query (str): 查询文本
+            k (int): 返回文档数量
+            include_tongyi (bool): 是否包含通义百炼知识库
+            include_metaso (bool): 是否包含Metaso知识库
+            include_pubchem (bool): 是否包含PubChem数据库
+        
+        Returns:
+            Dict: 综合检索结果
+        """
+        result = {
+            'query': query,
+            'local_documents': [],
+            'external_knowledge': {},
+            'combined_answer': '',
+            'sources': []
+        }
+        
+        # 1. 首先进行本地向量检索
+        try:
+            local_result = self.retrieve_comprehensive(query, k)
+            result['local_documents'] = local_result
+            
+            if local_result:
+                result['combined_answer'] += "### 本地知识库检索结果:\n"
+                for i, doc in enumerate(local_result[:3], 1):  # 只显示前3个结果
+                    content = doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
+                    result['combined_answer'] += f"{i}. {content}\n\n"
+                result['sources'].append('本地知识库')
+        except Exception as e:
+            print(f"本地检索出错: {e}")
+        
+        # 2. 调用外部知识库API
+        if include_tongyi or include_metaso or include_pubchem:
+            try:
+                # 使用增强的综合信息获取方法
+                external_result = self.knowledge_api.get_enhanced_comprehensive_info(query)
+                result['external_knowledge'] = external_result
+                
+                if external_result.get('combined_answer'):
+                    result['combined_answer'] += external_result['combined_answer']
+                    
+                # 添加成功的外部知识源
+                for source_info in external_result.get('all_sources', []):
+                    if source_info.get('success'):
+                        result['sources'].append(source_info['source'])
+                        
+            except Exception as e:
+                print(f"外部知识库检索出错: {e}")
+                result['external_knowledge'] = {'error': str(e)}
+        
+        # 3. 如果没有获得任何结果，提供默认信息
+        if not result['combined_answer']:
+            result['combined_answer'] = "抱歉，未能从知识库中找到相关信息。请尝试重新表述您的问题或使用更具体的关键词。"
+        
+        return result
+    
+    def search_tongyi_only(self, query: str):
+        """
+        仅使用通义百炼知识检索智能体进行搜索
+        
+        Args:
+            query (str): 查询文本
+        
+        Returns:
+            Dict: 通义百炼检索结果
+        """
+        try:
+            return self.knowledge_api.search_tongyi_knowledge(query)
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'通义百炼检索出错: {str(e)}',
+                'answer': '',
+                'usage': None
+            }
+    
+    def get_knowledge_api_status(self):
+        """
+        获取知识API状态信息
+        
+        Returns:
+            Dict: 知识API状态
+        """
+        return {
+            'tongyi_configured': bool(self.knowledge_api.tongyi_api_key and self.knowledge_api.tongyi_app_id),
+            'metaso_configured': bool(self.knowledge_api.metaso_config.get('api_key')),
+            'pubchem_available': True,  # PubChem是公开API
+            'dashscope_available': hasattr(self.knowledge_api, 'DASHSCOPE_AVAILABLE') and getattr(self.knowledge_api, 'DASHSCOPE_AVAILABLE', False)
         }

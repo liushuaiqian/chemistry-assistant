@@ -10,8 +10,17 @@ import requests
 import json
 import time
 from typing import Dict, Any, List, Optional
+from http import HTTPStatus
 from config import EXTERNAL_API_CONFIG
 from utils.logger import get_logger
+
+try:
+    from dashscope import Application
+    DASHSCOPE_AVAILABLE = True
+except ImportError:
+    DASHSCOPE_AVAILABLE = False
+    logger = get_logger(__name__)
+    logger.warning("dashscope库未安装，通义百炼知识检索功能将不可用")
 
 logger = get_logger(__name__)
 
@@ -33,6 +42,13 @@ class KnowledgeAPI:
         self.metaso_api_key = self.metaso_config.get('api_key', '')
         self.metaso_topic_id = self.metaso_config.get('search_topic_id', '')
         self.metaso_timeout = self.metaso_config.get('timeout', 30)
+        
+        # 通义百炼知识检索智能体API配置
+        self.tongyi_app_config = EXTERNAL_API_CONFIG.get('tongyi_knowledge_app', {})
+        self.tongyi_api_key = self.tongyi_app_config.get('api_key', '')
+        self.tongyi_app_id = self.tongyi_app_config.get('app_id', '')
+        self.tongyi_pipeline_ids = self.tongyi_app_config.get('pipeline_ids', [])
+        self.tongyi_timeout = self.tongyi_app_config.get('timeout', 30)
     
     def get_compound_info(self, compound):
         """
@@ -415,5 +431,164 @@ class KnowledgeAPI:
                         if 'iupac_name' in pubchem_result:
                             result['combined_answer'] += f"IUPAC名称: {pubchem_result['iupac_name']}\n"
                     break
+        
+        return result
+    
+    def search_tongyi_knowledge(self, prompt: str) -> Dict[str, Any]:
+        """
+        搜索通义百炼知识检索智能体
+        
+        Args:
+            prompt (str): 搜索提示词/问题
+            
+        Returns:
+            dict: 搜索结果，包含答案和相关信息
+        """
+        if not DASHSCOPE_AVAILABLE:
+            logger.error("dashscope库未安装，无法使用通义百炼知识检索功能")
+            return {
+                'success': False,
+                'error': 'dashscope库未安装',
+                'answer': '',
+                'usage': None
+            }
+        
+        if not self.tongyi_api_key or not self.tongyi_app_id:
+            logger.warning("通义百炼知识检索API配置不完整，无法进行搜索")
+            return {
+                'success': False,
+                'error': '通义百炼API配置不完整',
+                'answer': '',
+                'usage': None
+            }
+        
+        try:
+            logger.info(f"正在搜索通义百炼知识库: {prompt[:50]}...")
+            
+            # 构建rag_options
+            rag_options = {}
+            if self.tongyi_pipeline_ids:
+                rag_options['pipeline_ids'] = self.tongyi_pipeline_ids
+            
+            # 调用通义百炼知识检索智能体API
+            response = Application.call(
+                api_key=self.tongyi_api_key,
+                app_id=self.tongyi_app_id,
+                prompt=prompt,
+                rag_options=rag_options
+            )
+            
+            # 检查响应状态
+            if response.status_code != HTTPStatus.OK:
+                error_msg = f"请求失败: {response.status_code} - {response.message}"
+                logger.error(f"通义百炼API请求失败: {error_msg}")
+                logger.error(f"request_id={response.request_id}")
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'answer': '',
+                    'usage': None,
+                    'request_id': getattr(response, 'request_id', '')
+                }
+            
+            # 提取响应数据
+            answer = response.output.text if hasattr(response.output, 'text') else str(response.output)
+            usage = getattr(response, 'usage', None)
+            request_id = getattr(response, 'request_id', '')
+            
+            logger.info(f"通义百炼知识库搜索成功，获得答案长度: {len(answer)}字符")
+            
+            return {
+                'success': True,
+                'answer': answer,
+                'usage': usage,
+                'request_id': request_id,
+                'prompt': prompt
+            }
+            
+        except Exception as e:
+            logger.error(f"通义百炼知识库搜索出错: {str(e)}")
+            return {
+                'success': False,
+                'error': f'搜索出错: {str(e)}',
+                'answer': '',
+                'usage': None
+            }
+    
+    def get_enhanced_comprehensive_info(self, query: str) -> Dict[str, Any]:
+        """
+        获取增强的综合信息，结合通义百炼、Metaso和PubChem多个知识源
+        
+        Args:
+            query (str): 查询内容
+            
+        Returns:
+            dict: 综合信息结果
+        """
+        result = {
+            'query': query,
+            'tongyi_result': None,
+            'metaso_result': None,
+            'pubchem_result': None,
+            'combined_answer': '',
+            'all_sources': []
+        }
+        
+        # 首先尝试通义百炼知识检索智能体
+        tongyi_result = self.search_tongyi_knowledge(query)
+        result['tongyi_result'] = tongyi_result
+        
+        if tongyi_result.get('success'):
+            result['combined_answer'] = f"### 通义百炼知识库检索结果:\n{tongyi_result.get('answer', '')}\n\n"
+            result['all_sources'].append({
+                'source': '通义百炼知识库',
+                'content': tongyi_result.get('answer', ''),
+                'success': True
+            })
+        
+        # 尝试Metaso知识库搜索作为补充
+        metaso_result = self.search_knowledge_base(query)
+        result['metaso_result'] = metaso_result
+        
+        if metaso_result.get('success'):
+            metaso_answer = metaso_result.get('answer', '')
+            if metaso_answer and metaso_answer not in result['combined_answer']:
+                result['combined_answer'] += f"### Metaso知识库补充信息:\n{metaso_answer}\n\n"
+                result['all_sources'].append({
+                    'source': 'Metaso知识库',
+                    'content': metaso_answer,
+                    'references': metaso_result.get('references', []),
+                    'success': True
+                })
+        
+        # 如果查询看起来像化合物名称，也尝试PubChem
+        if any(keyword in query.lower() for keyword in ['化合物', '分子', '化学式', '摩尔质量', '分子量', '甲烷', '乙烷', '苯', '水']):
+            # 尝试提取化合物名称
+            compound_keywords = ['甲烷', '乙烷', '苯', '水', 'H2O', 'CH4', 'C2H6', 'C6H6', '乙醇', 'C2H5OH']
+            for keyword in compound_keywords:
+                if keyword in query:
+                    pubchem_result = self.get_compound_info(keyword)
+                    if pubchem_result and 'error' not in pubchem_result:
+                        result['pubchem_result'] = pubchem_result
+                        
+                        pubchem_info = "### PubChem化合物数据库信息:\n"
+                        if 'molecular_formula' in pubchem_result:
+                            pubchem_info += f"分子式: {pubchem_result['molecular_formula']}\n"
+                        if 'molar_mass' in pubchem_result:
+                            pubchem_info += f"摩尔质量: {pubchem_result['molar_mass']} g/mol\n"
+                        if 'iupac_name' in pubchem_result:
+                            pubchem_info += f"IUPAC名称: {pubchem_result['iupac_name']}\n"
+                        
+                        result['combined_answer'] += pubchem_info + "\n"
+                        result['all_sources'].append({
+                            'source': 'PubChem数据库',
+                            'content': pubchem_info,
+                            'success': True
+                        })
+                    break
+        
+        # 如果没有获得任何结果，提供默认信息
+        if not result['combined_answer']:
+            result['combined_answer'] = "抱歉，未能从知识库中找到相关信息。请尝试重新表述您的问题或使用更具体的关键词。"
         
         return result
