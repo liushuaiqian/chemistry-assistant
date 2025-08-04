@@ -10,6 +10,8 @@ import argparse
 from core.controller import Controller
 from ui.app_gradio import start_ui
 from config import MODEL_CONFIG
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 def main():
     parser = argparse.ArgumentParser(description='Chemistry Assistant')

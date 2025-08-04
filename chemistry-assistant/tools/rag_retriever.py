@@ -503,9 +503,10 @@ class RAGRetriever:
             
             if local_result:
                 result['combined_answer'] += "### 本地知识库检索结果:\n"
-                for i, doc in enumerate(local_result[:3], 1):  # 只显示前3个结果
-                    content = doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
-                    result['combined_answer'] += f"{i}. {content}\n\n"
+                for i, content in enumerate(local_result[:3], 1):  # 只显示前3个结果
+                    # local_result已经是字符串列表，不需要访问page_content属性
+                    display_content = content[:200] + "..." if len(content) > 200 else content
+                    result['combined_answer'] += f"{i}. {display_content}\n\n"
                 result['sources'].append('本地知识库')
         except Exception as e:
             print(f"本地检索出错: {e}")

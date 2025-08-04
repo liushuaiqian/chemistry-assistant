@@ -6,7 +6,7 @@ Agent管理器
 负责Agent管理和协作逻辑
 """
 
-# from agents.local_model_agent import LocalModelAgent  # 临时禁用
+from agents.local_model_agent import LocalModelAgent
 from agents.external_agent import ExternalAgent
 from agents.retriever_agent import RetrieverAgent
 from agents.tools_agent import ToolsAgent

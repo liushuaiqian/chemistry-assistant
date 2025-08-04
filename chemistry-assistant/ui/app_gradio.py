@@ -225,7 +225,9 @@ def start_ui(controller=None):
     启动Gradio Web界面
     """
     
-    def process_question(question, function_choice, image=None, adaptive_enabled=False, show_complexity=True, show_strategy=True, progress=gr.Progress()):
+    def process_question(question, function_choice, image=None, 
+                        enable_local_rag=True, enable_metaso=True, enable_tongyi=True, enable_pubchem=True,
+                        adaptive_enabled=False, show_complexity=True, show_strategy=True, progress=gr.Progress()):
         """处理用户问题，带加载状态"""
         progress(0, desc="开始处理...")
         time.sleep(0.5)  # 给进度条显示时间
@@ -240,7 +242,11 @@ def start_ui(controller=None):
     
         # 构建任务信息
         task_info = {
-            'function': function_choice
+            'function': function_choice,
+            'enable_local_rag': enable_local_rag,
+            'enable_metaso': enable_metaso,
+            'enable_tongyi': enable_tongyi,
+            'enable_pubchem': enable_pubchem
         }
     
         if image is not None:
@@ -251,8 +257,48 @@ def start_ui(controller=None):
         try:
             progress(0.3, desc="正在处理问题...")
             
+            # 综合检索处理
+            if function_choice == "综合检索":
+                progress(0.4, desc="正在进行综合检索...")
+                
+                # 调用综合检索方法
+                result = controller.process_comprehensive_retrieval(
+                    question, 
+                    enable_local_rag=enable_local_rag,
+                    enable_metaso=enable_metaso, 
+                    enable_tongyi=enable_tongyi,
+                    enable_pubchem=enable_pubchem
+                )
+                
+                if result.get('success'):
+                    answer = result.get('combined_answer', '未获取到结果')
+                    
+                    # 构建知识源信息
+                    sources_info = []
+                    sources = result.get('sources', [])
+                    
+                    if sources:
+                        sources_info.append(f"**📚 使用的知识源**: {', '.join(sources)}")
+                    
+                    if 'local_documents' in result and result['local_documents']:
+                        sources_info.append(f"**📄 本地文档数**: {len(result['local_documents'])}")
+                    
+                    if 'external_knowledge' in result:
+                        ext_knowledge = result['external_knowledge']
+                        if ext_knowledge.get('all_sources'):
+                            successful_sources = [s['source'] for s in ext_knowledge['all_sources'] if s.get('success')]
+                            if successful_sources:
+                                sources_info.append(f"**🌐 外部知识源**: {', '.join(successful_sources)}")
+                    
+                    comp = "\n\n".join(sources_info) if sources_info else ""
+                    chain = ""
+                else:
+                    answer = result.get('error', '综合检索处理失败')
+                    comp = "检索失败，请检查网络连接和API配置"
+                    chain = ""
+            
             # 自适应检索处理
-            if function_choice == "自适应检索" or adaptive_enabled:
+            elif adaptive_enabled:
                 progress(0.4, desc="正在进行自适应检索...")
                 import asyncio
                 result = asyncio.run(controller.process_with_adaptive_retrieval(question))
@@ -309,9 +355,24 @@ def start_ui(controller=None):
             cleaned_comparison = clean_and_format_output(comp)
             cleaned_chain_result = clean_and_format_output(chain)
             
-            # 构建自适应检索状态信息
+            # 构建检索状态信息
             adaptive_status = ""
-            if function_choice == "自适应检索" or adaptive_enabled:
+            if function_choice == "综合检索":
+                status_parts = []
+                if enable_local_rag:
+                    status_parts.append("本地RAG")
+                if enable_metaso:
+                    status_parts.append("Metaso")
+                if enable_tongyi:
+                    status_parts.append("通义千问")
+                if enable_pubchem:
+                    status_parts.append("PubChem")
+                
+                if status_parts:
+                    adaptive_status = f"✅ 综合检索已启用: {', '.join(status_parts)}"
+                else:
+                    adaptive_status = "⚠️ 未启用任何知识源"
+            elif adaptive_enabled:
                 if hasattr(controller, 'enable_adaptive') and controller.enable_adaptive:
                     adaptive_status = "✅ 自适应检索已启用"
                 else:
@@ -434,11 +495,34 @@ def start_ui(controller=None):
             with gr.Column(scale=1):
                 gr.Markdown("### 设置")
                 function_choice = gr.Radio(
-                    choices=["智能问答", "化学计算", "信息检索", "LangChain处理", "自适应检索"],
-                    value="智能问答",
+                    choices=["智能问答", "化学计算", "综合检索", "LangChain处理"],
+                    value="综合检索",
                     label="功能类型",
                     info="选择要使用的功能"
                 )
+                
+                # 综合检索设置
+                with gr.Accordion("🔍 综合检索设置", open=True, visible=True) as comprehensive_settings:
+                    enable_local_rag = gr.Checkbox(
+                        label="启用本地RAG知识库",
+                        value=True,
+                        info="检索本地教材和题库"
+                    )
+                    enable_metaso = gr.Checkbox(
+                        label="启用Metaso API",
+                        value=True,
+                        info="调用Metaso知识库API"
+                    )
+                    enable_tongyi = gr.Checkbox(
+                        label="启用通义千问智能体",
+                        value=True,
+                        info="调用通义千问智能体知识库"
+                    )
+                    enable_pubchem = gr.Checkbox(
+                        label="启用PubChem数据库",
+                        value=True,
+                        info="检索化学化合物信息"
+                    )
                 
                 # 自适应检索相关设置
                 with gr.Accordion("🔧 自适应检索设置", open=False, visible=True) as adaptive_settings:
@@ -792,11 +876,15 @@ def start_ui(controller=None):
                 return f"获取报告过程中发生错误: {str(e)}"
         
         # 主要功能事件绑定
-        def submit_and_refresh(question, function_choice, image, adaptive_enabled, show_complexity, show_strategy):
+        def submit_and_refresh(question, function_choice, image, 
+                              enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem,
+                              adaptive_enabled, show_complexity, show_strategy):
             """提交问题并刷新历史记录"""
             # 处理问题
             answer, comparison, chain_result, adaptive_status = process_question(
-                question, function_choice, image, adaptive_enabled, show_complexity, show_strategy
+                question, function_choice, image, 
+                enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem,
+                adaptive_enabled, show_complexity, show_strategy
             )
             
             # 刷新历史记录和统计
@@ -807,13 +895,17 @@ def start_ui(controller=None):
 
         submit_btn.click(
             fn=submit_and_refresh,
-            inputs=[question_input, function_choice, image_input, adaptive_enabled, show_complexity_analysis, show_strategy_info],
+            inputs=[question_input, function_choice, image_input, 
+                   enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem,
+                   adaptive_enabled, show_complexity_analysis, show_strategy_info],
             outputs=[answer_output, comparison_output, chain_result_output, adaptive_status_output, history_list, stats_display]
         )
         
         question_input.submit(
             fn=submit_and_refresh,
-            inputs=[question_input, function_choice, image_input, adaptive_enabled, show_complexity_analysis, show_strategy_info],
+            inputs=[question_input, function_choice, image_input, 
+                   enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem,
+                   adaptive_enabled, show_complexity_analysis, show_strategy_info],
             outputs=[answer_output, comparison_output, chain_result_output, adaptive_status_output, history_list, stats_display]
         )
         
@@ -839,11 +931,35 @@ def start_ui(controller=None):
         example_btns[2].click(lambda: "什么是化学键？", outputs=question_input)
         example_btns[3].click(lambda: "查询苯的性质和用途", outputs=question_input)
     
+    # 动态端口分配，避免端口冲突
+    import socket
+    
+    def find_free_port(start_port=7861, max_port=7900):
+        """查找可用端口"""
+        for port in range(start_port, max_port + 1):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('127.0.0.1', port))
+                    return port
+            except OSError:
+                continue
+        return None
+    
+    # 查找可用端口
+    available_port = find_free_port()
+    if available_port is None:
+        print("❌ 无法找到可用端口，请手动指定端口")
+        available_port = 0  # 让Gradio自动分配
+    else:
+        print(f"🌐 使用端口: {available_port}")
+    
     demo.launch(
-        server_name="0.0.0.0",
-        server_port=7861,
+        server_name="127.0.0.1",
+        server_port=available_port,
         share=False,
-        inbrowser=True
+        inbrowser=True,
+        show_error=True,
+        quiet=False
     )
     
     return demo
