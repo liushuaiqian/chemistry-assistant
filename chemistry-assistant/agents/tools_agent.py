@@ -45,6 +45,18 @@ class ToolsAgent:
             result = self._balance_equation(query, task_info)
         elif tool_type == 'compound_info':
             result = self._get_compound_info(query, task_info)
+        elif tool_type == 'concentration':
+            result = self._calculate_concentration(query, task_info)
+        elif tool_type == 'ph':
+            result = self._calculate_ph(query, task_info)
+        elif tool_type == 'gas_law':
+            result = self._calculate_gas_law(query, task_info)
+        elif tool_type == 'stoichiometry':
+            result = self._calculate_stoichiometry(query, task_info)
+        elif tool_type == 'temperature':
+            result = self._convert_temperature(query, task_info)
+        elif tool_type == 'dilution':
+            result = self._calculate_dilution(query, task_info)
         else:
             result = "无法确定需要使用的工具类型"
         
@@ -72,6 +84,30 @@ class ToolsAgent:
         # 检查是否包含化合物信息查询相关关键词
         if any(keyword in query for keyword in ['化合物', '性质', '结构', '信息']):
             return 'compound_info'
+        
+        # 检查是否包含浓度计算相关关键词
+        if any(keyword in query for keyword in ['浓度', '摩尔浓度', '质量浓度', 'mol/L', 'g/L', '溶液']):
+            return 'concentration'
+        
+        # 检查是否包含pH计算相关关键词
+        if any(keyword in query for keyword in ['pH', 'ph', 'pOH', '酸碱', '氢离子', '氢氧根']):
+            return 'ph'
+        
+        # 检查是否包含气体定律相关关键词
+        if any(keyword in query for keyword in ['气体定律', '理想气体', '波义耳', '查理', '盖吕萨克', '压强', '体积', '温度']):
+            return 'gas_law'
+        
+        # 检查是否包含化学计量学相关关键词
+        if any(keyword in query for keyword in ['化学计量', '反应量', '产物量', '理论产量', '实际产量']):
+            return 'stoichiometry'
+        
+        # 检查是否包含温度转换相关关键词
+        if any(keyword in query for keyword in ['温度转换', '摄氏度', '华氏度', '开尔文', '°C', '°F', 'K']):
+            return 'temperature'
+        
+        # 检查是否包含稀释计算相关关键词
+        if any(keyword in query for keyword in ['稀释', '稀释液', '浓缩', '稀释倍数']):
+            return 'dilution'
         
         # 检查是否有检测到的化合物实体
         if 'detected_entities' in task_info:
@@ -217,3 +253,307 @@ class ToolsAgent:
         
         # 使用化学求解器的方法从查询中提取化合物
         return self.chemistry_solver.extract_compound(query)
+    
+    def _calculate_concentration(self, query, task_info):
+        """
+        计算溶液浓度
+        
+        Args:
+            query (str): 用户查询
+            task_info (dict): 任务相关信息
+            
+        Returns:
+            str: 计算结果
+        """
+        try:
+            # 从查询中提取参数
+            params = self._extract_concentration_params(query)
+            result = self.chemistry_solver.calculate_concentration(**params)
+            return f"浓度计算结果: {result}"
+        except Exception as e:
+            return f"计算浓度时出错: {str(e)}"
+    
+    def _calculate_ph(self, query, task_info):
+        """
+        计算pH值
+        
+        Args:
+            query (str): 用户查询
+            task_info (dict): 任务相关信息
+            
+        Returns:
+            str: 计算结果
+        """
+        try:
+            # 从查询中提取参数
+            params = self._extract_ph_params(query)
+            result = self.chemistry_solver.calculate_ph(**params)
+            return f"pH计算结果: {result}"
+        except Exception as e:
+            return f"计算pH时出错: {str(e)}"
+    
+    def _calculate_gas_law(self, query, task_info):
+        """
+        计算气体定律
+        
+        Args:
+            query (str): 用户查询
+            task_info (dict): 任务相关信息
+            
+        Returns:
+            str: 计算结果
+        """
+        try:
+            # 从查询中提取参数
+            params = self._extract_gas_law_params(query)
+            result = self.chemistry_solver.calculate_gas_law(**params)
+            return f"气体定律计算结果: {result}"
+        except Exception as e:
+            return f"计算气体定律时出错: {str(e)}"
+    
+    def _calculate_stoichiometry(self, query, task_info):
+        """
+        计算化学计量学
+        
+        Args:
+            query (str): 用户查询
+            task_info (dict): 任务相关信息
+            
+        Returns:
+            str: 计算结果
+        """
+        try:
+            # 从查询中提取参数
+            params = self._extract_stoichiometry_params(query)
+            result = self.chemistry_solver.calculate_stoichiometry(**params)
+            return f"化学计量学计算结果: {result}"
+        except Exception as e:
+            return f"计算化学计量学时出错: {str(e)}"
+    
+    def _convert_temperature(self, query, task_info):
+        """
+        转换温度单位
+        
+        Args:
+            query (str): 用户查询
+            task_info (dict): 任务相关信息
+            
+        Returns:
+            str: 转换结果
+        """
+        try:
+            # 从查询中提取参数
+            params = self._extract_temperature_params(query)
+            result = self.chemistry_solver.convert_temperature(**params)
+            return f"温度转换结果: {result}"
+        except Exception as e:
+            return f"转换温度时出错: {str(e)}"
+    
+    def _calculate_dilution(self, query, task_info):
+        """
+        计算溶液稀释
+        
+        Args:
+            query (str): 用户查询
+            task_info (dict): 任务相关信息
+            
+        Returns:
+            str: 计算结果
+        """
+        try:
+            # 从查询中提取参数
+            params = self._extract_dilution_params(query)
+            result = self.chemistry_solver.calculate_solution_dilution(**params)
+            return f"稀释计算结果: {result}"
+        except Exception as e:
+            return f"计算稀释时出错: {str(e)}"
+    
+    def _extract_concentration_params(self, query):
+        """
+        从查询中提取浓度计算参数
+        
+        Args:
+            query (str): 用户查询
+            
+        Returns:
+            dict: 参数字典
+        """
+        import re
+        
+        # 简单的参数提取逻辑，实际应用中可能需要更复杂的NLP处理
+        params = {}
+        
+        # 提取摩尔数
+        moles_match = re.search(r'(\d+\.?\d*)\s*mol', query)
+        if moles_match:
+            params['moles'] = float(moles_match.group(1))
+        
+        # 提取体积
+        volume_match = re.search(r'(\d+\.?\d*)\s*[Ll]', query)
+        if volume_match:
+            params['volume'] = float(volume_match.group(1))
+        
+        # 提取质量
+        mass_match = re.search(r'(\d+\.?\d*)\s*[gG]', query)
+        if mass_match:
+            params['mass'] = float(mass_match.group(1))
+        
+        return params
+    
+    def _extract_ph_params(self, query):
+        """
+        从查询中提取pH计算参数
+        
+        Args:
+            query (str): 用户查询
+            
+        Returns:
+            dict: 参数字典
+        """
+        import re
+        
+        params = {}
+        
+        # 提取浓度
+        concentration_match = re.search(r'(\d+\.?\d*)\s*[Mm]', query)
+        if concentration_match:
+            params['concentration'] = float(concentration_match.group(1))
+        
+        # 判断酸碱类型
+        if any(keyword in query for keyword in ['强酸', 'HCl', 'HNO3', 'H2SO4']):
+            params['acid_type'] = 'strong'
+        elif any(keyword in query for keyword in ['弱酸', 'CH3COOH', 'HCOOH']):
+            params['acid_type'] = 'weak'
+        elif any(keyword in query for keyword in ['强碱', 'NaOH', 'KOH']):
+            params['base_type'] = 'strong'
+        elif any(keyword in query for keyword in ['弱碱', 'NH3']):
+            params['base_type'] = 'weak'
+        
+        return params
+    
+    def _extract_gas_law_params(self, query):
+        """
+        从查询中提取气体定律参数
+        
+        Args:
+            query (str): 用户查询
+            
+        Returns:
+            dict: 参数字典
+        """
+        import re
+        
+        params = {}
+        
+        # 提取压强
+        pressure_match = re.search(r'(\d+\.?\d*)\s*(?:atm|Pa|kPa|mmHg)', query)
+        if pressure_match:
+            params['pressure'] = float(pressure_match.group(1))
+        
+        # 提取体积
+        volume_match = re.search(r'(\d+\.?\d*)\s*[Ll]', query)
+        if volume_match:
+            params['volume'] = float(volume_match.group(1))
+        
+        # 提取温度
+        temp_match = re.search(r'(\d+\.?\d*)\s*[KkCc°]', query)
+        if temp_match:
+            params['temperature'] = float(temp_match.group(1))
+        
+        # 提取摩尔数
+        moles_match = re.search(r'(\d+\.?\d*)\s*mol', query)
+        if moles_match:
+            params['moles'] = float(moles_match.group(1))
+        
+        return params
+    
+    def _extract_stoichiometry_params(self, query):
+        """
+        从查询中提取化学计量学参数
+        
+        Args:
+            query (str): 用户查询
+            
+        Returns:
+            dict: 参数字典
+        """
+        params = {}
+        
+        # 提取化学方程式
+        equation = self._extract_equation(query)
+        if equation:
+            params['equation'] = equation
+        
+        # 提取反应物量
+        import re
+        amount_match = re.search(r'(\d+\.?\d*)\s*(?:mol|g)', query)
+        if amount_match:
+            params['reactant_amount'] = float(amount_match.group(1))
+        
+        return params
+    
+    def _extract_temperature_params(self, query):
+        """
+        从查询中提取温度转换参数
+        
+        Args:
+            query (str): 用户查询
+            
+        Returns:
+            dict: 参数字典
+        """
+        import re
+        
+        params = {}
+        
+        # 提取温度值
+        temp_match = re.search(r'(\d+\.?\d*)', query)
+        if temp_match:
+            params['temperature'] = float(temp_match.group(1))
+        
+        # 判断源单位和目标单位
+        if '°C' in query or '摄氏' in query:
+            params['from_unit'] = 'C'
+        elif '°F' in query or '华氏' in query:
+            params['from_unit'] = 'F'
+        elif 'K' in query or '开尔文' in query:
+            params['from_unit'] = 'K'
+        
+        if '转' in query:
+            if '华氏' in query.split('转')[1] or '°F' in query.split('转')[1]:
+                params['to_unit'] = 'F'
+            elif '开尔文' in query.split('转')[1] or 'K' in query.split('转')[1]:
+                params['to_unit'] = 'K'
+            else:
+                params['to_unit'] = 'C'
+        
+        return params
+    
+    def _extract_dilution_params(self, query):
+        """
+        从查询中提取稀释计算参数
+        
+        Args:
+            query (str): 用户查询
+            
+        Returns:
+            dict: 参数字典
+        """
+        import re
+        
+        params = {}
+        
+        # 提取初始浓度
+        c1_match = re.search(r'(\d+\.?\d*)\s*[Mm]', query)
+        if c1_match:
+            params['c1'] = float(c1_match.group(1))
+        
+        # 提取体积
+        volumes = re.findall(r'(\d+\.?\d*)\s*[Ll]', query)
+        if len(volumes) >= 2:
+            params['v1'] = float(volumes[0])
+            params['v2'] = float(volumes[1])
+        elif len(volumes) == 1:
+            params['v1'] = float(volumes[0])
+        
+        return params

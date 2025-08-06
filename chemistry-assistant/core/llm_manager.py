@@ -87,6 +87,27 @@ class LLMManager:
                     max_tokens=2000
                 )
                 self.logger.info("Qianfan模型初始化成功")
+            
+            # 初始化ERNIE-X1-Turbo-32K模型
+            if 'ernie_x1' in MODEL_CONFIG and MODEL_CONFIG['ernie_x1'].get('api_key'):
+                self.models['ernie_x1'] = ChatOpenAI(
+                    api_key=MODEL_CONFIG['ernie_x1']['api_key'],
+                    base_url='https://qianfan.baidubce.com/v2/',
+                    model=MODEL_CONFIG['ernie_x1'].get('model', 'ernie-x1-turbo-32k'),
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+                self.logger.info("ERNIE-X1-Turbo-32K模型初始化成功")
+            
+            # 初始化Moonshot-Kimi-K2-Instruct模型（专门用于答案融合）
+            if 'moonshot_kimi' in MODEL_CONFIG and MODEL_CONFIG['moonshot_kimi'].get('api_key'):
+                self.models['moonshot_kimi'] = ChatTongyi(
+                    dashscope_api_key=MODEL_CONFIG['moonshot_kimi']['api_key'],
+                    model=MODEL_CONFIG['moonshot_kimi'].get('model', 'Moonshot-Kimi-K2-Instruct'),
+                    temperature=0.2,  # 融合任务使用较低温度确保稳定性
+                    max_tokens=3000   # 融合任务可能需要更多输出
+                )
+                self.logger.info("Moonshot-Kimi-K2-Instruct融合模型初始化成功")
                 
         except Exception as e:
             self.logger.error(f"模型初始化失败: {str(e)}")

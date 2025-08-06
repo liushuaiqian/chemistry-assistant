@@ -58,6 +58,19 @@ MODEL_CONFIG = {
         'api_key': 'bce-v3/ALTAK-DqIxHUg2AELWWq5FxTKzj/9c9ed9c7be093b8232b927ff134341bd3b0e3ec2',
         'model': 'ernie-4.5-turbo-128k',
     },
+    
+    # ERNIE-X1-Turbo-32K
+    'ernie_x1': {
+        'api_key': 'bce-v3/ALTAK-DqIxHUg2AELWWq5FxTKzj/9c9ed9c7be093b8232b927ff134341bd3b0e3ec2',
+        'model': 'ernie-x1-turbo-32k',
+    },
+    
+    # Moonshot-Kimi-K2-Instruct（专门用于答案融合）
+    'moonshot_kimi': {
+        'api_key': 'sk-df1f72de49554dfab781d878a7530a91',  # 阿里云百炼/通义密钥
+        'model': 'Moonshot-Kimi-K2-Instruct',
+        'role': 'fusion_only',  # 标记为专门用于融合
+    },
     # 嵌入模型
     'embedding': {
         'model_name': 'bge-large-zh-v1.5',  # 本地模型名称（备用）

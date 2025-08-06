@@ -816,6 +816,23 @@ def start_ui(controller=None):
                 gr.Button("查询苯的性质", size="sm")
             ]
         
+        gr.Markdown("### 🧪 化学计算示例")
+        with gr.Row():
+            chem_calc_btns = [
+                gr.Button("计算0.1mol NaCl在1L水中的浓度", size="sm"),
+                gr.Button("计算0.1M HCl溶液的pH值", size="sm"),
+                gr.Button("理想气体定律：1mol气体在STP条件下的体积", size="sm"),
+                gr.Button("25°C转换为华氏度", size="sm")
+            ]
+        
+        with gr.Row():
+            more_chem_btns = [
+                gr.Button("稀释：1M HCl 100mL稀释到500mL", size="sm"),
+                gr.Button("化学计量：2mol H2与O2反应产生多少mol H2O", size="sm"),
+                gr.Button("计算0.1M NaOH溶液的pH值", size="sm"),
+                gr.Button("波义耳定律：压强从1atm变为2atm时体积变化", size="sm")
+            ]
+        
         with gr.Accordion("系统信息", open=False):
             gr.Markdown("""
             **版本**: 1.0.0  
@@ -930,6 +947,17 @@ def start_ui(controller=None):
         example_btns[1].click(lambda: "平衡化学方程式：H2 + O2 = H2O", outputs=question_input)
         example_btns[2].click(lambda: "什么是化学键？", outputs=question_input)
         example_btns[3].click(lambda: "查询苯的性质和用途", outputs=question_input)
+        
+        # 化学计算示例按钮事件绑定
+        chem_calc_btns[0].click(lambda: "计算0.1mol NaCl在1L水中的浓度", outputs=question_input)
+        chem_calc_btns[1].click(lambda: "计算0.1M HCl溶液的pH值", outputs=question_input)
+        chem_calc_btns[2].click(lambda: "理想气体定律：1mol气体在STP条件下的体积", outputs=question_input)
+        chem_calc_btns[3].click(lambda: "25°C转换为华氏度", outputs=question_input)
+        
+        more_chem_btns[0].click(lambda: "稀释：1M HCl 100mL稀释到500mL", outputs=question_input)
+        more_chem_btns[1].click(lambda: "化学计量：2mol H2与O2反应产生多少mol H2O", outputs=question_input)
+        more_chem_btns[2].click(lambda: "计算0.1M NaOH溶液的pH值", outputs=question_input)
+        more_chem_btns[3].click(lambda: "波义耳定律：压强从1atm变为2atm时体积变化", outputs=question_input)
     
     # 动态端口分配，避免端口冲突
     import socket

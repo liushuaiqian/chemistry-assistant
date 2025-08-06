@@ -73,10 +73,10 @@ class ChemistryAnalysisChain:
         self.vision_config = MODEL_CONFIG.get('tongyi_vision', {})
         
         # 配置并行处理的模型列表
-        self.parallel_models = ['tongyi', 'deepseek', 'qianfan']  # qwen3通过tongyi调用，deepseek-r1
+        self.parallel_models = ['tongyi', 'deepseek', 'qianfan', 'ernie_x1']  # qwen3通过tongyi调用，deepseek-r1，新增ERNIE-X1-Turbo-32K
         
         # 初始化线程池用于并行处理
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=len(self.parallel_models))
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(4, len(self.parallel_models)))
         
         self._setup_prompts()
         self._setup_chains()
@@ -622,11 +622,22 @@ class ChemistryAnalysisChain:
     5. 使用LaTeX格式表示化学公式
     综合答案：
     """
-            integration_model = self._select_best_model(['tongyi', 'deepseek', 'zhipu'])
-            if integration_model:
+            # 优先使用专门的融合模型moonshot_kimi
+            fusion_model = None
+            if self.llm_manager.is_model_available('moonshot_kimi'):
+                fusion_model = 'moonshot_kimi'
+                self.logger.info("[结果整合] 使用专门的融合模型 Moonshot-Kimi-K2-Instruct")
+                # 为专门的融合模型创建更专业的提示词
+                integration_prompt = self._build_chemistry_fusion_prompt(question, successful_results)
+            else:
+                # 降级到现有模型
+                fusion_model = self._select_best_model(['tongyi', 'deepseek', 'zhipu'])
+                self.logger.info(f"[结果整合] 融合模型不可用，降级使用 {fusion_model}")
+            
+            if fusion_model:
                 messages = [HumanMessage(content=integration_prompt)]
-                integrated_answer = self.llm_manager.call_model(integration_model, messages, temperature=0.2)
-                self.logger.info(f"[结果整合] 使用 {integration_model} 完成结果整合")
+                integrated_answer = self.llm_manager.call_model(fusion_model, messages, temperature=0.2)
+                self.logger.info(f"[结果整合] 使用 {fusion_model} 完成结果整合")
                 # 使用统一的OutputCleaner进行清理
                 from utils.output_cleaner import clean_model_output
                 return clean_model_output(integrated_answer)
@@ -644,6 +655,59 @@ class ChemistryAnalysisChain:
                         from utils.output_cleaner import clean_output
                         return clean_output(f"**{model_name} 模型回答：**\n\n{result['answer']}")
             return "结果整合失败，无法生成答案。"
+    
+    def _build_chemistry_fusion_prompt(self, question: str, successful_results: Dict[str, Dict[str, Any]]) -> str:
+        """
+        为专门的融合模型构建化学领域专业的融合提示词
+        
+        Args:
+            question: 原始化学问题
+            successful_results: 成功的模型结果字典
+            
+        Returns:
+            str: 专业的融合提示词
+        """
+        prompt = f"""你是一位资深的化学教育专家和AI答案评估专家，专门负责整合多个AI模型对化学问题的回答。
+
+**原始化学问题：**
+{question}
+
+**评估标准：**
+1. 化学概念和原理的准确性
+2. 化学计算过程的正确性和完整性
+3. 化学公式、方程式的规范性
+4. 解释的逻辑性和教学价值
+5. 答案的完整性和实用性
+
+**各模型回答分析：**
+"""
+        
+        # 添加各模型的回答
+        model_labels = ['A', 'B', 'C', 'D', 'E']
+        for i, (model_name, result) in enumerate(successful_results.items()):
+            label = model_labels[i] if i < len(model_labels) else f"模型{i+1}"
+            prompt += f"\n**模型{label} ({model_name}) 的回答：**\n```\n{result['answer']}\n```\n"
+        
+        prompt += f"""
+
+**融合任务要求：**
+1. **准确性优先**：确保化学概念、公式、计算完全正确
+2. **完整性保证**：整合各模型的优点，补充遗漏信息
+3. **逻辑清晰**：按照化学问题解答的标准流程组织答案
+4. **规范表达**：使用标准的化学术语和LaTeX格式的化学公式
+5. **教学价值**：提供清晰的解题思路和知识点解释
+6. **分歧处理**：如果模型间有分歧，请分析原因并给出最合理的解释
+
+**输出格式要求：**
+- 使用清晰的段落结构
+- 化学公式使用LaTeX格式（如：$\\ce{{H2SO4}}$、$\\Delta H$等）
+- 计算过程要详细且易懂
+- 重要概念要有适当解释
+
+**最终融合答案：**
+"""
+        
+        return prompt
     
     def _generate_model_comparison(self, parallel_results: Dict[str, Dict[str, Any]]) -> str:
         """

@@ -8,7 +8,7 @@
 
 ### 1. 统一的 LLM 管理器
 - **文件**: `core/llm_manager.py`
-- **功能**: 统一管理多种大语言模型（OpenAI、通义千问、智谱AI、DeepSeek）
+- **功能**: 统一管理多种大语言模型（OpenAI、通义千问、智谱AI、DeepSeek、ERNIE-X1-Turbo-32K）
 - **优势**: 简化 API 调用、统一错误处理、自动重试机制
 
 ### 2. 化学分析链

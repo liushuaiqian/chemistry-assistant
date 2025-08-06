@@ -7,6 +7,7 @@
 """
 
 import re
+import math
 from sympy import symbols, Matrix, solve_linear_system, Rational
 
 class ChemistrySolver:
@@ -364,3 +365,347 @@ class ChemistrySolver:
         
         # 计算最大公约数
         return reduce(gcd, non_zero)
+    
+    def calculate_concentration(self, moles=None, volume=None, mass=None, molar_mass=None, molarity=None):
+        """
+        计算溶液浓度
+        
+        Args:
+            moles (float): 溶质的摩尔数 (mol)
+            volume (float): 溶液体积 (L)
+            mass (float): 溶质质量 (g)
+            molar_mass (float): 溶质摩尔质量 (g/mol)
+            molarity (float): 摩尔浓度 (mol/L)
+            
+        Returns:
+            dict: 包含计算结果的字典
+        """
+        result = {}
+        
+        # 如果给定质量和摩尔质量，计算摩尔数
+        if mass is not None and molar_mass is not None:
+            moles = mass / molar_mass
+            result['moles_calculated'] = moles
+        
+        # 计算摩尔浓度 (M = n/V)
+        if moles is not None and volume is not None:
+            molarity = moles / volume
+            result['molarity'] = molarity
+            result['molarity_unit'] = 'mol/L'
+        
+        # 计算体积 (V = n/M)
+        elif moles is not None and molarity is not None:
+            volume = moles / molarity
+            result['volume'] = volume
+            result['volume_unit'] = 'L'
+        
+        # 计算摩尔数 (n = M×V)
+        elif molarity is not None and volume is not None:
+            moles = molarity * volume
+            result['moles'] = moles
+            result['moles_unit'] = 'mol'
+        
+        return result
+    
+    def calculate_ph(self, concentration=None, poh=None, is_acid=True, is_strong=True, ka=None, kb=None):
+        """
+        计算pH值
+        
+        Args:
+            concentration (float): 酸或碱的浓度 (mol/L)
+            poh (float): pOH值
+            is_acid (bool): 是否为酸性溶液
+            is_strong (bool): 是否为强酸/强碱
+            ka (float): 酸解离常数
+            kb (float): 碱解离常数
+            
+        Returns:
+            dict: 包含pH、pOH、[H+]、[OH-]等信息的字典
+        """
+        result = {}
+        
+        # 从pOH计算pH
+        if poh is not None:
+            ph = 14 - poh
+            result['pH'] = ph
+            result['pOH'] = poh
+            result['H+_concentration'] = 10 ** (-ph)
+            result['OH-_concentration'] = 10 ** (-poh)
+            return result
+        
+        if concentration is None:
+            raise ValueError("必须提供浓度或pOH值")
+        
+        if is_strong:
+            # 强酸强碱的计算
+            if is_acid:
+                # 强酸: [H+] = C
+                h_concentration = concentration
+                ph = -math.log10(h_concentration)
+            else:
+                # 强碱: [OH-] = C
+                oh_concentration = concentration
+                poh = -math.log10(oh_concentration)
+                ph = 14 - poh
+                h_concentration = 10 ** (-ph)
+        else:
+            # 弱酸弱碱的计算
+            if is_acid and ka is not None:
+                # 弱酸: [H+] = sqrt(Ka × C)
+                h_concentration = math.sqrt(ka * concentration)
+                ph = -math.log10(h_concentration)
+            elif not is_acid and kb is not None:
+                # 弱碱: [OH-] = sqrt(Kb × C)
+                oh_concentration = math.sqrt(kb * concentration)
+                poh = -math.log10(oh_concentration)
+                ph = 14 - poh
+                h_concentration = 10 ** (-ph)
+            else:
+                raise ValueError("弱酸弱碱计算需要提供Ka或Kb值")
+        
+        result['pH'] = round(ph, 2)
+        result['pOH'] = round(14 - ph, 2)
+        result['H+_concentration'] = h_concentration
+        result['OH-_concentration'] = 10 ** (-(14 - ph))
+        result['concentration_input'] = concentration
+        result['acid_type'] = '强酸' if is_strong and is_acid else ('弱酸' if is_acid else ('强碱' if is_strong else '弱碱'))
+        
+        return result
+    
+    def calculate_gas_law(self, pressure=None, volume=None, temperature=None, moles=None, 
+                         mass=None, molar_mass=None, law_type='ideal'):
+        """
+        气体定律计算 (理想气体定律: PV = nRT)
+        
+        Args:
+            pressure (float): 压强 (atm)
+            volume (float): 体积 (L)
+            temperature (float): 温度 (K)
+            moles (float): 摩尔数 (mol)
+            mass (float): 质量 (g)
+            molar_mass (float): 摩尔质量 (g/mol)
+            law_type (str): 气体定律类型 ('ideal', 'boyle', 'charles', 'gay_lussac')
+            
+        Returns:
+            dict: 包含计算结果的字典
+        """
+        R = 0.08206  # 理想气体常数 (L·atm/(mol·K))
+        result = {}
+        
+        # 如果给定质量和摩尔质量，计算摩尔数
+        if mass is not None and molar_mass is not None:
+            moles = mass / molar_mass
+            result['moles_calculated'] = moles
+        
+        if law_type == 'ideal':
+            # 理想气体定律: PV = nRT
+            known_vars = sum([1 for var in [pressure, volume, temperature, moles] if var is not None])
+            
+            if known_vars < 3:
+                raise ValueError("理想气体定律计算至少需要3个已知量")
+            
+            if pressure is None:
+                pressure = (moles * R * temperature) / volume
+                result['pressure'] = pressure
+                result['pressure_unit'] = 'atm'
+            elif volume is None:
+                volume = (moles * R * temperature) / pressure
+                result['volume'] = volume
+                result['volume_unit'] = 'L'
+            elif temperature is None:
+                temperature = (pressure * volume) / (moles * R)
+                result['temperature'] = temperature
+                result['temperature_unit'] = 'K'
+                result['temperature_celsius'] = temperature - 273.15
+            elif moles is None:
+                moles = (pressure * volume) / (R * temperature)
+                result['moles'] = moles
+                result['moles_unit'] = 'mol'
+        
+        elif law_type == 'boyle':
+            # 玻意耳定律: P1V1 = P2V2 (温度恒定)
+            if pressure is not None and volume is not None:
+                result['PV_product'] = pressure * volume
+                result['law'] = 'Boyle\'s Law: P₁V₁ = P₂V₂'
+        
+        elif law_type == 'charles':
+            # 查理定律: V1/T1 = V2/T2 (压强恒定)
+            if volume is not None and temperature is not None:
+                result['V_over_T'] = volume / temperature
+                result['law'] = 'Charles\' Law: V₁/T₁ = V₂/T₂'
+        
+        elif law_type == 'gay_lussac':
+            # 盖-吕萨克定律: P1/T1 = P2/T2 (体积恒定)
+            if pressure is not None and temperature is not None:
+                result['P_over_T'] = pressure / temperature
+                result['law'] = 'Gay-Lussac\'s Law: P₁/T₁ = P₂/T₂'
+        
+        # 添加标准状态下的信息
+        if moles is not None:
+            result['volume_at_STP'] = moles * 22.4  # 标准状况下的体积 (L)
+            result['volume_at_STP_unit'] = 'L (at STP)'
+        
+        return result
+    
+    def calculate_stoichiometry(self, equation, given_amount, given_compound, target_compound, amount_type='moles'):
+        """
+        化学计量学计算
+        
+        Args:
+            equation (str): 平衡的化学方程式
+            given_amount (float): 已知物质的量
+            given_compound (str): 已知物质的化学式
+            target_compound (str): 目标物质的化学式
+            amount_type (str): 量的类型 ('moles', 'mass', 'volume_gas')
+            
+        Returns:
+            dict: 包含计算结果的字典
+        """
+        result = {}
+        
+        # 解析平衡方程式获取系数
+        reactants, products = self._parse_equation(equation)
+        all_compounds = reactants + products
+        
+        # 找到给定物质和目标物质的系数
+        given_coeff = None
+        target_coeff = None
+        
+        for compound in all_compounds:
+            if compound['formula'] == given_compound:
+                given_coeff = compound['coefficient']
+            if compound['formula'] == target_compound:
+                target_coeff = compound['coefficient']
+        
+        if given_coeff is None:
+            raise ValueError(f"在方程式中未找到化合物: {given_compound}")
+        if target_coeff is None:
+            raise ValueError(f"在方程式中未找到化合物: {target_compound}")
+        
+        # 计算摩尔比
+        molar_ratio = target_coeff / given_coeff
+        
+        if amount_type == 'moles':
+            # 直接按摩尔比计算
+            target_moles = given_amount * molar_ratio
+            result['target_moles'] = target_moles
+            result['target_moles_unit'] = 'mol'
+        
+        elif amount_type == 'mass':
+            # 质量计算：先转换为摩尔数，再计算目标摩尔数，最后转换为质量
+            given_molar_mass = self.calculate_molar_mass(given_compound)
+            target_molar_mass = self.calculate_molar_mass(target_compound)
+            
+            given_moles = given_amount / given_molar_mass
+            target_moles = given_moles * molar_ratio
+            target_mass = target_moles * target_molar_mass
+            
+            result['given_molar_mass'] = given_molar_mass
+            result['target_molar_mass'] = target_molar_mass
+            result['given_moles'] = given_moles
+            result['target_moles'] = target_moles
+            result['target_mass'] = target_mass
+            result['target_mass_unit'] = 'g'
+        
+        elif amount_type == 'volume_gas':
+            # 气体体积计算（标准状况）
+            given_moles = given_amount / 22.4  # 标准状况下1mol气体占22.4L
+            target_moles = given_moles * molar_ratio
+            target_volume = target_moles * 22.4
+            
+            result['given_moles'] = given_moles
+            result['target_moles'] = target_moles
+            result['target_volume'] = target_volume
+            result['target_volume_unit'] = 'L (at STP)'
+        
+        result['molar_ratio'] = molar_ratio
+        result['equation'] = equation
+        result['given_compound'] = given_compound
+        result['target_compound'] = target_compound
+        result['given_coefficient'] = given_coeff
+        result['target_coefficient'] = target_coeff
+        
+        return result
+    
+    def convert_temperature(self, temperature, from_unit='C', to_unit='K'):
+        """
+        温度单位转换
+        
+        Args:
+            temperature (float): 温度值
+            from_unit (str): 原单位 ('C', 'K', 'F')
+            to_unit (str): 目标单位 ('C', 'K', 'F')
+            
+        Returns:
+            float: 转换后的温度值
+        """
+        # 先转换为开尔文
+        if from_unit == 'C':
+            kelvin = temperature + 273.15
+        elif from_unit == 'F':
+            kelvin = (temperature - 32) * 5/9 + 273.15
+        elif from_unit == 'K':
+            kelvin = temperature
+        else:
+            raise ValueError("不支持的温度单位")
+        
+        # 从开尔文转换为目标单位
+        if to_unit == 'C':
+            return kelvin - 273.15
+        elif to_unit == 'F':
+            return (kelvin - 273.15) * 9/5 + 32
+        elif to_unit == 'K':
+            return kelvin
+        else:
+            raise ValueError("不支持的温度单位")
+    
+    def calculate_solution_dilution(self, c1=None, v1=None, c2=None, v2=None):
+        """
+        溶液稀释计算 (C1V1 = C2V2)
+        
+        Args:
+            c1 (float): 原溶液浓度 (mol/L)
+            v1 (float): 原溶液体积 (L)
+            c2 (float): 稀释后浓度 (mol/L)
+            v2 (float): 稀释后体积 (L)
+            
+        Returns:
+            dict: 包含计算结果的字典
+        """
+        result = {}
+        known_vars = sum([1 for var in [c1, v1, c2, v2] if var is not None])
+        
+        if known_vars < 3:
+            raise ValueError("稀释计算至少需要3个已知量")
+        
+        if c1 is None:
+            c1 = (c2 * v2) / v1
+            result['original_concentration'] = c1
+            result['original_concentration_unit'] = 'mol/L'
+        elif v1 is None:
+            v1 = (c2 * v2) / c1
+            result['original_volume'] = v1
+            result['original_volume_unit'] = 'L'
+        elif c2 is None:
+            c2 = (c1 * v1) / v2
+            result['final_concentration'] = c2
+            result['final_concentration_unit'] = 'mol/L'
+        elif v2 is None:
+            v2 = (c1 * v1) / c2
+            result['final_volume'] = v2
+            result['final_volume_unit'] = 'L'
+        
+        # 计算稀释倍数
+        if c1 is not None and c2 is not None:
+            dilution_factor = c1 / c2
+            result['dilution_factor'] = dilution_factor
+        
+        # 计算需要加入的溶剂体积
+        if v1 is not None and v2 is not None:
+            solvent_volume = v2 - v1
+            result['solvent_volume_to_add'] = solvent_volume
+            result['solvent_volume_unit'] = 'L'
+        
+        result['equation'] = 'C₁V₁ = C₂V₂'
+        
+        return result
