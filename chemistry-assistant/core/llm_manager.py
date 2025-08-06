@@ -8,7 +8,10 @@ LLM管理器
 
 import os
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+import base64
+import json
+import requests
+from typing import List, Dict, Any, Optional, Tuple, Union
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_community.chat_models import ChatTongyi
@@ -42,7 +45,7 @@ class LLMManager:
                     api_key=MODEL_CONFIG['openai']['api_key'],
                     model=MODEL_CONFIG['openai'].get('model', 'gpt-3.5-turbo'),
                     temperature=0.7,
-                    max_tokens=2000
+                    max_tokens=8000
                 )
                 self.logger.info("OpenAI模型初始化成功")
             
@@ -52,7 +55,7 @@ class LLMManager:
                     dashscope_api_key=MODEL_CONFIG['tongyi']['api_key'],
                     model=MODEL_CONFIG['tongyi'].get('model', 'qwen-turbo'),
                     temperature=0.7,
-                    max_tokens=2000
+                    max_tokens=8000
                 )
                 self.logger.info("通义千问模型初始化成功")
             
@@ -62,8 +65,8 @@ class LLMManager:
                     api_key=MODEL_CONFIG['zhipu']['api_key'],
                     base_url=MODEL_CONFIG['zhipu'].get('api_base', 'https://open.bigmodel.cn/api/paas/v4/'),
                     model=MODEL_CONFIG['zhipu'].get('model', 'glm-4'),
-                    temperature=0.3,
-                    max_tokens=2000
+                    temperature=0.7,
+                    max_tokens=8000
                 )
                 self.logger.info("智谱AI模型初始化成功")
             
@@ -71,9 +74,9 @@ class LLMManager:
             if 'deepseek' in MODEL_CONFIG and MODEL_CONFIG['deepseek'].get('api_key'):
                 self.models['deepseek'] = ChatTongyi(
                     dashscope_api_key=MODEL_CONFIG['deepseek']['api_key'],
-                    model=MODEL_CONFIG['deepseek'].get('model', 'deepseek-v2'),
+                    model=MODEL_CONFIG['deepseek'].get('model', 'deepseek-v3'),
                     temperature=0.7,
-                    max_tokens=2000
+                    max_tokens=8000
                 )
                 self.logger.info("DeepSeek模型初始化成功")
             
@@ -84,7 +87,7 @@ class LLMManager:
                     base_url='https://qianfan.baidubce.com/v2/',
                     model=MODEL_CONFIG['qianfan'].get('model', 'ernie-4.5-turbo-128k'),
                     temperature=0.7,
-                    max_tokens=2000
+                    max_tokens=8000
                 )
                 self.logger.info("Qianfan模型初始化成功")
             
@@ -95,7 +98,7 @@ class LLMManager:
                     base_url='https://qianfan.baidubce.com/v2/',
                     model=MODEL_CONFIG['ernie_x1'].get('model', 'ernie-x1-turbo-32k'),
                     temperature=0.7,
-                    max_tokens=2000
+                    max_tokens=8000
                 )
                 self.logger.info("ERNIE-X1-Turbo-32K模型初始化成功")
             
@@ -105,9 +108,16 @@ class LLMManager:
                     dashscope_api_key=MODEL_CONFIG['moonshot_kimi']['api_key'],
                     model=MODEL_CONFIG['moonshot_kimi'].get('model', 'Moonshot-Kimi-K2-Instruct'),
                     temperature=0.2,  # 融合任务使用较低温度确保稳定性
-                    max_tokens=3000   # 融合任务可能需要更多输出
+                    max_tokens=8000   # 融合任务可能需要更多输出
                 )
                 self.logger.info("Moonshot-Kimi-K2-Instruct融合模型初始化成功")
+            
+            # 初始化ERNIE 4.5 Turbo VL视觉多模态模型
+            if 'ernie_vl' in MODEL_CONFIG and MODEL_CONFIG['ernie_vl'].get('api_key'):
+                # 注意：ERNIE VL是视觉多模态模型，不使用标准的LangChain接口
+                # 这里只是标记模型可用，实际调用会使用专门的API接口
+                self.models['ernie_vl'] = 'vision_multimodal'  # 特殊标记
+                self.logger.info("ERNIE 4.5 Turbo VL视觉多模态模型初始化成功")
                 
         except Exception as e:
             self.logger.error(f"模型初始化失败: {str(e)}")
@@ -290,13 +300,95 @@ class LLMManager:
             # 如果没有可用的融合模型，返回简单合并
             combined_answer = "\n\n---\n\n".join([f"**{name}回答：**\n{ans}" for name, ans in answers.items()])
             return clean_output(combined_answer), clean_output(comparison_text)
+    
+    def call_ernie_vl(self, question: str, image_data: Union[str, bytes]) -> str:
+        """
+        调用ERNIE 4.5 Turbo VL视觉多模态模型
+        
+        Args:
+            question: 文本问题
+            image_data: 图片数据（base64编码或字节数据）
+            
+        Returns:
+            str: 模型回答
+        """
+        import base64
+        import json
+        import requests
+        from typing import Union
         
         try:
-            messages = [HumanMessage(content=fusion_prompt)]
-            fused_answer = self.call_model(fusion_model, messages, temperature=0.3)
-            return clean_model_output(fused_answer), clean_output(comparison_text)
+            # 获取配置
+            ernie_vl_config = MODEL_CONFIG.get('ernie_vl', {})
+            if not ernie_vl_config.get('api_key'):
+                return "错误: ERNIE VL模型API密钥未配置"
+            
+            # 处理图片数据
+            if isinstance(image_data, bytes):
+                # 如果是字节数据，转换为base64
+                encoded = base64.b64encode(image_data).decode("utf-8")
+                image_b64 = f"data:image/jpeg;base64,{encoded}"
+            elif isinstance(image_data, str) and image_data.startswith('data:image'):
+                # 如果已经是完整的data URL格式，直接使用
+                image_b64 = image_data
+            elif isinstance(image_data, str):
+                # 如果是纯base64字符串（从controller传来的格式），添加data URL前缀
+                image_b64 = f"data:image/jpeg;base64,{image_data}"
+            else:
+                # 如果是文件路径，尝试读取并转换
+                try:
+                    with open(str(image_data), "rb") as f:
+                        data = f.read()
+                    encoded = base64.b64encode(data).decode("utf-8")
+                    image_b64 = f"data:image/jpeg;base64,{encoded}"
+                except Exception as e:
+                    self.logger.error(f"[ERNIE VL] 无法读取图片文件: {str(e)}")
+                    return f"错误: 无法处理图片数据 - {str(e)}"
+            
+            # 构建请求体
+            payload = {
+                "model": ernie_vl_config.get('model', 'ernie-4.5-turbo-vl-preview'),
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": question},
+                            {"type": "image_url", "image_url": {"url": image_b64}},
+                        ],
+                    }
+                ],
+            }
+            
+            # 设置请求头
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {ernie_vl_config['api_key']}",
+            }
+            
+            # 发送请求
+            api_url = ernie_vl_config.get('api_url', 'https://qianfan.baidubce.com/v2/chat/completions')
+            self.logger.info(f"[ERNIE VL] 开始调用视觉多模态模型...")
+            
+            response = requests.post(
+                api_url, 
+                headers=headers, 
+                data=json.dumps(payload, ensure_ascii=False), 
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if 'choices' in result and len(result['choices']) > 0:
+                    content = result['choices'][0]['message']['content']
+                    self.logger.info(f"[ERNIE VL] 调用成功，响应长度: {len(content)}")
+                    return clean_output(content)
+                else:
+                    self.logger.error(f"[ERNIE VL] 响应格式异常: {result}")
+                    return "错误: ERNIE VL模型响应格式异常"
+            else:
+                self.logger.error(f"[ERNIE VL] API调用失败: {response.status_code} - {response.text}")
+                return f"错误: ERNIE VL模型调用失败 ({response.status_code})"
+                
         except Exception as e:
-            self.logger.error(f"答案融合失败: {str(e)}")
-            # 融合失败时返回简单合并
-            combined_answer = "\n\n---\n\n".join([f"**{name}回答：**\n{ans}" for name, ans in answers.items()])
-            return clean_output(combined_answer), clean_output(comparison_text)
+            self.logger.error(f"[ERNIE VL] 调用异常: {str(e)}")
+            return f"错误: ERNIE VL模型调用异常 - {str(e)}"

@@ -317,14 +317,46 @@ class ChemistryAnalysisChain:
         """
         try:
             # 第一步：多模态输入处理
-            processed_question = self._process_multimodal_input(question, image_data)
-            if isinstance(processed_question, dict) and 'error' in processed_question:
-                return processed_question
+            processed_input = self._process_multimodal_input(question, image_data)
+            if isinstance(processed_input, dict) and 'error' in processed_input:
+                return processed_input
+            
+            # 处理不同的输入格式
+            if isinstance(processed_input, dict) and 'has_image' in processed_input:
+                # 有图片的情况
+                processed_question = processed_input['question']
+                image_data_for_models = processed_input['image_data']
+                has_image = True
+                
+                # 使用qwen-vl提取图片中的文本内容，供非多模态模型使用
+                self.logger.info("[图片解析] 开始使用qwen-vl解析图片内容...")
+                extracted_text = self.extract_text_from_image(image_data_for_models)
+                
+                if extracted_text and not extracted_text.startswith(("视觉模型未配置", "图像识别失败", "图像处理出错")):
+                    # 将解析出的图片文本与原问题结合
+                    if question and question.strip():
+                        enhanced_question = f"{question.strip()}\n\n图片内容：{extracted_text}"
+                    else:
+                        enhanced_question = f"请分析这个化学题目并给出详细的解答思路和步骤。\n\n图片内容：{extracted_text}"
+                    
+                    self.logger.info(f"[图片解析] 成功解析图片内容，增强问题长度: {len(enhanced_question)} 字符")
+                    processed_question_for_text_models = enhanced_question
+                else:
+                    self.logger.warning("[图片解析] 图片解析失败，非多模态模型将使用原始问题")
+                    processed_question_for_text_models = processed_question
+            else:
+                # 纯文字的情况
+                processed_question = processed_input
+                processed_question_for_text_models = processed_input
+                image_data_for_models = None
+                has_image = False
             
             self.logger.info(f"[并行处理] 开始处理问题: {processed_question[:100]}...")
+            if has_image:
+                self.logger.info("[并行处理] 检测到图片输入，将调用ERNIE VL视觉模型，并为非多模态模型提供图片解析文本")
             
             # 第二步：并行调用多个模型
-            parallel_results = self._parallel_model_call(processed_question)
+            parallel_results = self._parallel_model_call(processed_question, processed_question_for_text_models, image_data_for_models, has_image)
             
             # 第三步：结果整合
             integrated_result = self._integrate_results(parallel_results, processed_question)
@@ -366,25 +398,27 @@ class ChemistryAnalysisChain:
             image_data: 图片数据
             
         Returns:
-            Union[str, Dict]: 处理后的问题文本或错误信息
+            Union[str, Dict]: 处理后的问题文本或错误信息，如果有图片则返回包含image_data的字典
         """
         try:
             # 处理图片输入
             if image_data:
-                self.logger.info("[多模态处理] 检测到图片输入，开始视觉识别...")
-                extracted_text = self.extract_text_from_image(image_data)
+                self.logger.info("[多模态处理] 检测到图片输入，准备调用ERNIE VL视觉模型...")
                 
-                if "识别失败" in extracted_text or "处理出错" in extracted_text:
-                    return {'error': extracted_text}
-                
-                # 图片+文字组合
+                # 准备问题文本
                 if question and question.strip():
-                    combined_question = f"图片内容：\n{extracted_text}\n\n补充问题：{question}"
+                    final_question = question.strip()
                 else:
-                    combined_question = f"请分析以下化学问题：\n{extracted_text}"
+                    final_question = "请分析这个化学题目并给出详细的解答思路和步骤。"
                     
-                self.logger.info(f"[多模态处理] 图片识别完成，内容长度: {len(extracted_text)}")
-                return combined_question
+                self.logger.info(f"[多模态处理] 图片处理准备完成，问题: {final_question[:50]}...")
+                
+                # 返回包含图片数据的字典，用于ERNIE VL模型调用
+                return {
+                    'question': final_question,
+                    'image_data': image_data,
+                    'has_image': True
+                }
             else:
                 # 纯文字输入
                 if not question or not question.strip():
@@ -395,28 +429,57 @@ class ChemistryAnalysisChain:
             self.logger.error(f"[多模态处理] 输入处理失败: {str(e)}")
             return {'error': f"输入处理失败: {str(e)}"}
 
-    def _parallel_model_call(self, question: str) -> Dict[str, Dict[str, Any]]:
+    def _parallel_model_call(self, question: str, enhanced_question_for_text_models: str = None, image_data: Union[str, bytes] = None, has_image: bool = False) -> Dict[str, Dict[str, Any]]:
         """
         并行调用多个模型进行问题处理
         
         Args:
-            question: 处理后的问题文本
+            question: 原始问题文本（用于ERNIE VL等视觉模型）
+            enhanced_question_for_text_models: 增强后的问题文本（包含图片解析内容，用于非多模态模型）
+            image_data: 图片数据（可选）
+            has_image: 是否包含图片
             
         Returns:
             Dict[str, Dict]: 各模型的处理结果
         """
-        self.logger.info(f"[并行调用] 开始并行调用 {len(self.parallel_models)} 个模型")
+        # 确定要调用的模型列表
+        models_to_call = self.parallel_models.copy()
+        if has_image and image_data:
+            models_to_call.append('ernie_vl')  # 有图片时增加ERNIE VL模型
+            self.logger.info("[并行调用] 检测到图片输入，增加ERNIE VL视觉模型")
+        
+        self.logger.info(f"[并行调用] 开始并行调用 {len(models_to_call)} 个模型")
         
         # 为每个模型创建处理任务
         future_to_model = {}
         results = {}
         
-        for model_name in self.parallel_models:
-            if self.llm_manager.is_model_available(model_name):
+        for model_name in models_to_call:
+            if model_name == 'ernie_vl':
+                # 特殊处理ERNIE VL模型
+                if has_image and image_data:
+                    try:
+                        future = self.executor.submit(self._ernie_vl_process, question, image_data)
+                        future_to_model[future] = model_name
+                        self.logger.info(f"[并行调用] 已提交ERNIE VL视觉模型的处理任务")
+                    except Exception as e:
+                        self.logger.error(f"[并行调用] 提交ERNIE VL模型任务失败: {str(e)}")
+                        results[model_name] = {
+                            'error': f"任务提交失败: {str(e)}",
+                            'answer': '',
+                            'processing_time': 0,
+                            'success': False
+                        }
+            elif self.llm_manager.is_model_available(model_name):
                 try:
-                    future = self.executor.submit(self._single_model_process, model_name, question)
+                    # 为非多模态模型使用增强后的问题文本（如果有图片的话）
+                    question_for_model = enhanced_question_for_text_models if (has_image and enhanced_question_for_text_models) else question
+                    future = self.executor.submit(self._single_model_process, model_name, question_for_model)
                     future_to_model[future] = model_name
-                    self.logger.info(f"[并行调用] 已提交模型 {model_name} 的处理任务")
+                    if has_image and enhanced_question_for_text_models:
+                        self.logger.info(f"[并行调用] 已提交模型 {model_name} 的处理任务（使用图片解析文本）")
+                    else:
+                        self.logger.info(f"[并行调用] 已提交模型 {model_name} 的处理任务")
                 except Exception as e:
                     self.logger.error(f"[并行调用] 提交模型 {model_name} 任务失败: {str(e)}")
                     results[model_name] = {
@@ -488,6 +551,58 @@ class ChemistryAnalysisChain:
         successful_count = len([r for r in results.values() if r.get('success', False)])
         self.logger.info(f"[并行调用] 完成，成功: {successful_count}/{len(results)}")
         return results
+    
+    def _ernie_vl_process(self, question: str, image_data: Union[str, bytes]) -> Dict[str, Any]:
+        """
+        ERNIE VL视觉模型的处理逻辑
+        
+        Args:
+            question: 问题文本
+            image_data: 图片数据
+            
+        Returns:
+            Dict[str, Any]: ERNIE VL模型的处理结果
+        """
+        import time
+        start_time = time.time()
+        
+        try:
+            self.logger.info("[ERNIE VL] 开始处理视觉问题")
+            
+            # 调用ERNIE VL模型
+            result = self.llm_manager.call_ernie_vl(question, image_data)
+            
+            processing_time = time.time() - start_time
+            
+            if result and 'error' not in result:
+                self.logger.info(f"[ERNIE VL] 处理成功，耗时: {processing_time:.2f}秒")
+                return {
+                    'answer': result,
+                    'processing_time': processing_time,
+                    'success': True,
+                    'model_type': 'vision_multimodal'
+                }
+            else:
+                error_msg = result.get('error', '未知错误') if result else '返回结果为空'
+                self.logger.error(f"[ERNIE VL] 处理失败: {error_msg}")
+                return {
+                    'error': f"ERNIE VL处理失败: {error_msg}",
+                    'answer': '',
+                    'processing_time': processing_time,
+                    'success': False,
+                    'model_type': 'vision_multimodal'
+                }
+                
+        except Exception as e:
+            processing_time = time.time() - start_time
+            self.logger.error(f"[ERNIE VL] 处理异常: {str(e)}")
+            return {
+                'error': f"ERNIE VL处理异常: {str(e)}",
+                'answer': '',
+                'processing_time': processing_time,
+                'success': False,
+                'model_type': 'vision_multimodal'
+            }
     
     def _single_model_process(self, model_name: str, question: str) -> Dict[str, Any]:
         """

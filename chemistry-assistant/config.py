@@ -71,6 +71,14 @@ MODEL_CONFIG = {
         'model': 'Moonshot-Kimi-K2-Instruct',
         'role': 'fusion_only',  # 标记为专门用于融合
     },
+    
+    # ERNIE 4.5 Turbo VL（视觉多模态模型）
+    'ernie_vl': {
+        'api_key': 'bce-v3/ALTAK-DqIxHUg2AELWWq5FxTKzj/9c9ed9c7be093b8232b927ff134341bd3b0e3ec2',
+        'model': 'ernie-4.5-turbo-vl-preview',
+        'api_url': 'https://qianfan.baidubce.com/v2/chat/completions',
+        'role': 'vision_multimodal',  # 标记为视觉多模态模型
+    },
     # 嵌入模型
     'embedding': {
         'model_name': 'bge-large-zh-v1.5',  # 本地模型名称（备用）
