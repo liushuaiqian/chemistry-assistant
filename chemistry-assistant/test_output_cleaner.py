@@ -1,83 +1,91 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
-测试输出清理功能
+测试输出清理器功能
 """
 
-from utils.output_cleaner import clean_output, clean_model_output, clean_parallel_output
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from utils.output_cleaner import output_cleaner
 
 def test_output_cleaner():
     """
-    测试输出清理功能
+    测试输出清理器的各种功能
     """
-    print("=== 测试输出清理功能 ===")
+    print("=== 测试输出清理器功能 ===")
     
-    # 测试原始乱码文本
-    test_text = """### 问题分析和解题思路
-
-要从铁生成三氧化二铁\(\ce{ 
- $$ 
- }\)可以通过铁与氧气在特定条件下反应来实现这个过程通常涉及到铁的氧化即铁失去电子给氧分子从而形成氧化物根据条件的不同如温度氧气浓度等可以得到不同形式的铁氧化物但本题特别指出了是三氧化二铁\(\ce{$Fe{2} 
- O_{3}$}\)
-
-### 详细的解答步骤
-
-**步骤一确定反应物**
-- 反应物为纯铁 \(\ce{ 
- $$}\) 和氧气 \(\ce{$\ce{$O_{2}Extra close brace or missing open brace 
- }\)
-
-**步骤二写出化学方程式**
-- 铁与氧气反应生成三氧化二铁的基本化学方程式为
- \[
- 4\ce{$\ce{Fe}$} + 3\ce{$\ce{$O_{2}Extra close brace or missing open brace 
- } 
-  2\ce{$Fe_{2} 
- O_{3}$}
- \]"""
+    # 测试1: 基本Markdown清理
+    print("\n1. 测试基本Markdown清理:")
+    raw_text = """
+    这是一个化学反应：H2 + O2 → H2O
     
+    化学公式：$H_2SO_4$
+    
+    代码块：
+    ```python
+    print("hello")
+    
+    数学公式：$$\\Delta H = -285.8 \\text{ kJ/mol}$$
+    
+    特殊字符：<script>alert('test')</script>
+    """
+    
+    cleaned = output_cleaner.clean_model_response(raw_text)
     print("原始文本:")
-    print(test_text)
-    print("\n" + "="*50 + "\n")
+    print(repr(raw_text))
+    print("\n清理后:")
+    print(cleaned)
     
-    # 清理文本
-    cleaned_text = clean_output(test_text)
-    print("清理后文本:")
-    print(cleaned_text)
-    print("\n" + "="*50 + "\n")
+    # 测试2: 化学公式标准化
+    print("\n\n2. 测试化学公式标准化:")
+    chemical_text = """
+    水的分子式是H2O，硫酸是H2SO4
+    反应：2H2 + O2 → 2H2O
+    温度变化：ΔH = -285.8 kJ/mol
+    """
     
-    # 测试模型输出清理
-    model_response = {
-        'answer': test_text,
-        'model_name': 'test_model',
-        'success': True
-    }
+    normalized = output_cleaner._normalize_chemical_formulas(chemical_text)
+    print("原始文本:")
+    print(chemical_text)
+    print("\n标准化后:")
+    print(normalized)
     
-    cleaned_model_output = clean_model_output(model_response)
-    print("清理后模型输出:")
-    print(cleaned_model_output)
-    print("\n" + "="*50 + "\n")
+    # 测试3: 融合输出清理
+    print("\n\n3. 测试融合输出清理:")
+    model_output = """
+    ## 模型A的回答
     
-    # 测试并行结果清理
-    parallel_results = {
-        'tongyi': {
-            'answer': test_text,
-            'model_name': 'tongyi',
-            'success': True
-        },
-        'deepseek': {
-            'answer': test_text,
-            'model_name': 'deepseek', 
-            'success': True
-        }
-    }
+    这个化学反应的方程式是：
+    $H_2 + Cl_2 \\rightarrow 2HCl$
     
-    cleaned_parallel = clean_parallel_output(parallel_results)
-    print("清理后并行结果:")
-    for model_name, result in cleaned_parallel.items():
-        print(f"\n{model_name}:")
-        print(result['answer'][:200] + "...")
+    反应热为：$\\Delta H = -184.6 \\text{ kJ/mol}$
+    """
+    
+    fusion_cleaned = output_cleaner.sanitize_model_output_for_fusion(model_output, "测试模型")
+    print("原始模型输出:")
+    print(model_output)
+    print("\n融合清理后:")
+    print(fusion_cleaned)
+    
+    # 测试4: 最终格式化输出
+    print("\n\n4. 测试最终格式化输出:")
+    final_text = """
+    根据化学反应原理，氢气和氯气反应生成氯化氢：
+    
+    $H_2 + Cl_2 \\rightarrow 2HCl$
+    
+    这是一个放热反应，反应热为 $\\Delta H = -184.6 \\text{ kJ/mol}$
+    
+    反应条件：常温常压下即可进行。
+    """
+    
+    formatted = output_cleaner.format_final_output(final_text, "化学反应分析")
+    print("原始文本:")
+    print(final_text)
+    print("\n最终格式化后:")
+    print(formatted)
     
     print("\n=== 测试完成 ===")
 

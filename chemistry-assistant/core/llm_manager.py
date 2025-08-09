@@ -280,13 +280,36 @@ class LLMManager:
 2. 识别各个回答中的优点和不足
 3. 融合各个回答的优点，生成一个更准确、更完整的权威答复
 4. 如果回答有冲突，请基于化学原理做出正确的判断
-5. 在最终答复中，请将所有的化学方程式、离子方程式或分子式使用MathJax格式包裹：
-   - 行内公式使用 $...$ 格式，例如：$H_2SO_4$、$CaCO_3$
-   - 独立公式使用 $$...$$ 格式，例如：$$2H_2 + O_2 \\rightarrow 2H_2O$$
-   - 化学反应方程式使用 \\ce{} 命令，例如：$\\ce{H2SO4 + 2NaOH -> Na2SO4 + 2H2O}$
-   - 离子方程式也使用 \\ce{} 命令，例如：$\\ce{H+ + OH- -> H2O}$
 
-最终答复：
+**严格的输出格式要求：**
+1. **化学公式格式化**：
+   - 所有化学分子式必须使用下标格式：H₂O、CH₄、C₂H₄、H₂SO₄、CaCO₃等
+   - 离子公式使用上下标：Ca²⁺、SO₄²⁻、OH⁻等
+   - 绝对禁止使用H2O、CH4、C2H4等普通数字格式
+
+2. **化学反应方程式**：
+   - 使用标准反应箭头：→（而非->或=>）
+   - 完整格式示例：CH₄ + 2O₂ → CO₂ + 2H₂O
+   - 可逆反应使用：⇌
+   - 条件标注在箭头上方或下方
+
+3. **Markdown结构**：
+   - 使用清晰的标题层级（##、###）
+   - 重要步骤使用有序列表
+   - 关键概念使用**粗体**强调
+   - 计算过程使用代码块或表格展示
+
+4. **数学公式**：
+   - 复杂计算使用LaTeX格式：$\\Delta H = \\sum H_{{products}} - \\sum H_{{reactants}}$
+   - 简单数值计算直接显示：25°C、1.5 mol、98.5%
+
+5. **内容组织**：
+   - 问题分析 → 解题思路 → 详细步骤 → 最终答案 → 知识点总结
+   - 每个化学现象都要有科学解释
+   - 重要的化学原理要单独说明
+
+**最终答复：**
+请严格按照上述格式要求输出融合后的答案，确保所有化学公式都使用正确的下标格式，所有反应箭头都使用标准符号。
 """
         
         # 使用最可靠的模型进行融合（优先级：zhipu > openai > tongyi）
@@ -296,8 +319,15 @@ class LLMManager:
                 fusion_model = preferred_model
                 break
         
-        if not fusion_model:
-            # 如果没有可用的融合模型，返回简单合并
+        # 调用融合模型生成答案
+        try:
+            messages = [SystemMessage(content="你是一个专业的化学专家，擅长分析和融合多个来源的信息。"), 
+                       HumanMessage(content=fusion_prompt)]
+            fused_answer = self.call_model(fusion_model, messages)
+            return clean_output(fused_answer), clean_output(comparison_text)
+        except Exception as e:
+            self.logger.error(f"[LLM管理器] 融合模型调用失败: {str(e)}")
+            # 如果融合失败，返回简单合并
             combined_answer = "\n\n---\n\n".join([f"**{name}回答：**\n{ans}" for name, ans in answers.items()])
             return clean_output(combined_answer), clean_output(comparison_text)
     

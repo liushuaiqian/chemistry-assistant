@@ -506,15 +506,23 @@ class ChemistryAnalysisChain:
             for future in concurrent.futures.as_completed(future_to_model, timeout=300):  # 5分钟超时
                 model_name = future_to_model[future]
                 try:
-                    result = future.result(timeout=30)  # 单个任务30秒超时
+                    # 为不同模型设置不同的超时时间
+                    if model_name in ['deepseek', 'ernie_x1']:
+                        timeout = 240  # deepseek和文心x1设置为4分钟
+                        self.logger.info(f"[并行调用] 模型 {model_name} 使用4分钟超时")
+                    else:
+                        timeout = 30   # 其他模型保持30秒超时
+                    
+                    result = future.result(timeout=timeout)
                     results[model_name] = result
                     self.logger.info(f"[并行调用] 模型 {model_name} 处理完成")
                 except concurrent.futures.TimeoutError:
-                    self.logger.error(f"[并行调用] 模型 {model_name} 处理超时")
+                    timeout_used = 240 if model_name in ['deepseek', 'ernie_x1'] else 30
+                    self.logger.error(f"[并行调用] 模型 {model_name} 处理超时（{timeout_used}秒）")
                     results[model_name] = {
-                        'error': f"模型 {model_name} 处理超时",
+                        'error': f"模型 {model_name} 处理超时（{timeout_used}秒）",
                         'answer': '',
-                        'processing_time': 30,
+                        'processing_time': timeout_used,
                         'success': False
                     }
                 except Exception as e:
@@ -530,10 +538,12 @@ class ChemistryAnalysisChain:
             # 处理未完成的任务
             for future, model_name in future_to_model.items():
                 if model_name not in results:
+                    # 为不同模型设置相应的超时时间
+                    timeout_used = 240 if model_name in ['deepseek', 'ernie_x1'] else 120
                     results[model_name] = {
-                        'error': f"模型 {model_name} 整体超时未完成",
+                        'error': f"模型 {model_name} 整体超时未完成（{timeout_used}秒）",
                         'answer': '',
-                        'processing_time': 120,
+                        'processing_time': timeout_used,
                         'success': False
                     }
         except Exception as e:
@@ -654,11 +664,33 @@ class ChemistryAnalysisChain:
 请基于背景知识提供：
 1. 问题分析和解题思路
 2. 详细的解答步骤
-3. 相关的化学原理和公式（使用LaTeX格式）
+3. 相关的化学原理和公式
 4. 最终答案
 5. 解题要点总结
 
-如果背景知识不足以完全回答问题，请结合你的专业知识进行补充。请确保回答准确、完整、易懂。
+**严格的输出格式要求：**
+1. **化学公式格式化**：
+   - 所有化学分子式必须使用下标格式：H₂O、CH₄、C₂H₄、H₂SO₄、CaCO₃等
+   - 离子公式使用上下标：Ca²⁺、SO₄²⁻、OH⁻等
+   - 绝对禁止使用H2O、CH4、C2H4等普通数字格式
+
+2. **化学反应方程式**：
+   - 使用标准反应箭头：→（而非->或=>）
+   - 完整格式示例：CH₄ + 2O₂ → CO₂ + 2H₂O
+   - 可逆反应使用：⇌
+   - 条件标注在箭头上方或下方
+
+3. **Markdown结构**：
+   - 使用清晰的标题层级（##、###）
+   - 重要步骤使用有序列表
+   - 关键概念使用**粗体**强调
+   - 计算过程使用代码块或表格展示
+
+4. **数学公式**：
+   - 复杂计算使用LaTeX格式：$\\Delta H = \\sum H_{{products}} - \\sum H_{{reactants}}$
+   - 简单数值计算直接显示：25°C、1.5 mol、98.5%
+
+如果背景知识不足以完全回答问题，请结合你的专业知识进行补充。请严格按照上述格式要求输出答案，确保所有化学公式都使用正确的下标格式，所有反应箭头都使用标准符号。
 """
             else:
                 prompt = f"""
@@ -669,11 +701,33 @@ class ChemistryAnalysisChain:
 请提供：
 1. 问题分析和解题思路
 2. 详细的解答步骤
-3. 相关的化学原理和公式（使用LaTeX格式）
+3. 相关的化学原理和公式
 4. 最终答案
 5. 解题要点总结
 
-请确保回答准确、完整、易懂。
+**严格的输出格式要求：**
+1. **化学公式格式化**：
+   - 所有化学分子式必须使用下标格式：H₂O、CH₄、C₂H₄、H₂SO₄、CaCO₃等
+   - 离子公式使用上下标：Ca²⁺、SO₄²⁻、OH⁻等
+   - 绝对禁止使用H2O、CH4、C2H4等普通数字格式
+
+2. **化学反应方程式**：
+   - 使用标准反应箭头：→（而非->或=>）
+   - 完整格式示例：CH₄ + 2O₂ → CO₂ + 2H₂O
+   - 可逆反应使用：⇌
+   - 条件标注在箭头上方或下方
+
+3. **Markdown结构**：
+   - 使用清晰的标题层级（##、###）
+   - 重要步骤使用有序列表
+   - 关键概念使用**粗体**强调
+   - 计算过程使用代码块或表格展示
+
+4. **数学公式**：
+   - 复杂计算使用LaTeX格式：$\\Delta H = \\sum H_{{products}} - \\sum H_{{reactants}}$
+   - 简单数值计算直接显示：25°C、1.5 mol、98.5%
+
+请严格按照上述格式要求输出答案，确保所有化学公式都使用正确的下标格式，所有反应箭头都使用标准符号。
 """
             
             messages = [HumanMessage(content=prompt)]
@@ -706,69 +760,87 @@ class ChemistryAnalysisChain:
             }
     
     def _integrate_results(self, parallel_results: Dict[str, Dict[str, Any]], question: str) -> str:
+        """
+        整合多个模型的结果，专门优化Markdown格式输出
+        """
         try:
+            # 导入输出清理器
+            from utils.output_cleaner import output_cleaner
+            
             successful_results = {k: v for k, v in parallel_results.items() if v.get('success', False) and v.get('answer', '').strip()}
             if not successful_results:
                 return "所有模型处理失败，无法生成答案。"
+            
+            # 单个模型结果直接返回，但要清理格式
             if len(successful_results) == 1:
                 model_name, result = list(successful_results.items())[0]
-                return f"**{model_name} 模型回答：**\n\n{result['answer']}"
-            # 新增相似度检查以简化融合
-            from difflib import SequenceMatcher
-            answers = list(successful_results.values())
-            similarity = SequenceMatcher(None, answers[0]['answer'], answers[1]['answer']).ratio()
-            if similarity > 0.8:  # 如果相似度高，直接返回第一个
-                return f"**融合答案（模型答案相似）：**\n\n{answers[0]['answer']}"
-            # 否则进行正常融合
+                cleaned_answer = output_cleaner.clean_model_response(result['answer'])
+                return f"## {model_name} 模型回答\n\n{cleaned_answer}"
+            
+            # 多个模型结果需要融合
             self.logger.info(f"[结果整合] 开始整合 {len(successful_results)} 个模型的结果")
-            integration_prompt = f"""
-    你是一个化学专家，现在需要整合多个AI模型对同一化学问题的回答，生成一个最优的综合答案。
-    原始问题：{question}
-    各模型回答：
-    """
+            
+            # 为每个模型输出进行专门的清理和格式化
+            cleaned_results = {}
             for model_name, result in successful_results.items():
-                integration_prompt += f"\n**{model_name} 模型回答：**\n{result['answer']}\n\n---\n"
-            integration_prompt += """
-    请基于以上多个模型的回答，生成一个综合的、最优的答案。要求：
-    1. 整合各模型的优点，去除重复内容
-    2. 确保科学准确性
-    3. 保持逻辑清晰和结构完整
-    4. 如果模型间有分歧，请指出并给出最合理的解释
-    5. 使用LaTeX格式表示化学公式
-    综合答案：
-    """
-            # 优先使用专门的融合模型moonshot_kimi
+                cleaned_answer = output_cleaner.sanitize_model_output_for_fusion(
+                    result['answer'], model_name
+                )
+                cleaned_results[model_name] = {
+                    **result,
+                    'answer': cleaned_answer
+                }
+            
+            # 检查答案相似度，避免不必要的融合
+            from difflib import SequenceMatcher
+            if len(cleaned_results) == 2:
+                answers = [r['answer'] for r in cleaned_results.values()]
+                similarity = SequenceMatcher(None, answers[0], answers[1]).ratio()
+                if similarity > 0.8:
+                    first_model = list(cleaned_results.keys())[0]
+                    first_answer = cleaned_results[first_model]['answer']
+                    return f"## 融合答案（模型答案高度相似）\n\n{first_answer}"
+            
+            # 构建专业的融合提示词
             fusion_model = None
             if self.llm_manager.is_model_available('moonshot_kimi'):
                 fusion_model = 'moonshot_kimi'
-                self.logger.info("[结果整合] 使用专门的融合模型 Moonshot-Kimi-K2-Instruct")
-                # 为专门的融合模型创建更专业的提示词
-                integration_prompt = self._build_chemistry_fusion_prompt(question, successful_results)
+                self.logger.info("[结果整合] 使用专门的融合模型 Moonshot-Kimi")
+                integration_prompt = self._build_chemistry_fusion_prompt(question, cleaned_results)
             else:
                 # 降级到现有模型
                 fusion_model = self._select_best_model(['tongyi', 'deepseek', 'zhipu'])
                 self.logger.info(f"[结果整合] 融合模型不可用，降级使用 {fusion_model}")
+                integration_prompt = self._build_simple_fusion_prompt(question, cleaned_results)
             
             if fusion_model:
                 messages = [HumanMessage(content=integration_prompt)]
                 integrated_answer = self.llm_manager.call_model(fusion_model, messages, temperature=0.2)
                 self.logger.info(f"[结果整合] 使用 {fusion_model} 完成结果整合")
-                # 使用统一的OutputCleaner进行清理
-                from utils.output_cleaner import clean_model_output
-                return clean_model_output(integrated_answer)
+                
+                # 对融合结果进行最终清理
+                final_answer = output_cleaner.format_final_output(
+                    integrated_answer, "融合答案"
+                )
+                return final_answer
             else:
-                # 如果无法整合，返回第一个结果
-                first_model, first_result = list(successful_results.items())[0]
-                from utils.output_cleaner import clean_output
-                return clean_output(f"**{first_model} 模型回答：**\n\n{first_result['answer']}")
+                # 如果无法整合，返回第一个清理后的结果
+                first_model, first_result = list(cleaned_results.items())[0]
+                return output_cleaner.format_final_output(
+                    first_result['answer'], f"{first_model} 模型回答"
+                )
+                
         except Exception as e:
             self.logger.error(f"[结果整合] 整合失败: {str(e)}")
             # 返回第一个可用结果
             if parallel_results:
                 for model_name, result in parallel_results.items():
                     if result.get('answer', '').strip():
-                        from utils.output_cleaner import clean_output
-                        return clean_output(f"**{model_name} 模型回答：**\n\n{result['answer']}")
+                        from utils.output_cleaner import output_cleaner
+                        cleaned = output_cleaner.clean_model_response(result['answer'])
+                        return output_cleaner.format_final_output(
+                            cleaned, f"{model_name} 模型回答（备用）"
+                        )
             return "结果整合失败，无法生成答案。"
     
     def _build_chemistry_fusion_prompt(self, question: str, successful_results: Dict[str, Dict[str, Any]]) -> str:
@@ -797,11 +869,12 @@ class ChemistryAnalysisChain:
 **各模型回答分析：**
 """
         
-        # 添加各模型的回答
+        # 添加各模型的回答（已经过清理和格式化）
         model_labels = ['A', 'B', 'C', 'D', 'E']
         for i, (model_name, result) in enumerate(successful_results.items()):
             label = model_labels[i] if i < len(model_labels) else f"模型{i+1}"
-            prompt += f"\n**模型{label} ({model_name}) 的回答：**\n```\n{result['answer']}\n```\n"
+            # 直接使用已经清理和格式化的答案
+            prompt += f"\n**模型{label} ({model_name}) 的回答：**\n{result['answer']}\n"
         
         prompt += f"""
 
@@ -809,17 +882,97 @@ class ChemistryAnalysisChain:
 1. **准确性优先**：确保化学概念、公式、计算完全正确
 2. **完整性保证**：整合各模型的优点，补充遗漏信息
 3. **逻辑清晰**：按照化学问题解答的标准流程组织答案
-4. **规范表达**：使用标准的化学术语和LaTeX格式的化学公式
+4. **规范表达**：使用标准的化学术语和规范的化学公式格式
 5. **教学价值**：提供清晰的解题思路和知识点解释
 6. **分歧处理**：如果模型间有分歧，请分析原因并给出最合理的解释
 
-**输出格式要求：**
-- 使用清晰的段落结构
-- 化学公式使用LaTeX格式（如：$\\ce{{H2SO4}}$、$\\Delta H$等）
-- 计算过程要详细且易懂
-- 重要概念要有适当解释
+**严格的输出格式要求：**
+1. **化学公式格式化**：
+   - 所有化学分子式必须使用下标格式：H₂O、CH₄、C₂H₄、H₂SO₄、CaCO₃等
+   - 离子公式使用上下标：Ca²⁺、SO₄²⁻、OH⁻等
+   - 绝对禁止使用H2O、CH4、C2H4等普通数字格式
+
+2. **化学反应方程式**：
+   - 使用标准反应箭头：→（而非->或=>）
+   - 完整格式示例：CH₄ + 2O₂ → CO₂ + 2H₂O
+   - 可逆反应使用：⇌
+   - 条件标注在箭头上方或下方
+
+3. **Markdown结构**：
+   - 使用清晰的标题层级（##、###）
+   - 重要步骤使用有序列表
+   - 关键概念使用**粗体**强调
+   - 计算过程使用代码块或表格展示
+
+4. **数学公式**：
+   - 复杂计算使用LaTeX格式：$\\Delta H = \\sum H_{{products}} - \\sum H_{{reactants}}$
+   - 简单数值计算直接显示：25°C、1.5 mol、98.5%
+
+5. **内容组织**：
+   - 问题分析 → 解题思路 → 详细步骤 → 最终答案 → 知识点总结
+   - 每个化学现象都要有科学解释
+   - 重要的化学原理要单独说明
 
 **最终融合答案：**
+请严格按照上述格式要求输出融合后的答案，确保所有化学公式都使用正确的下标格式，所有反应箭头都使用标准符号。不要添加额外的标题或说明。
+"""
+        
+        return prompt
+    
+    def _build_simple_fusion_prompt(self, question: str, successful_results: Dict[str, Dict[str, Any]]) -> str:
+        """
+        为普通模型构建简单的融合提示词
+        
+        Args:
+            question: 原始化学问题
+            successful_results: 成功的模型结果字典
+            
+        Returns:
+            str: 简单的融合提示词
+        """
+        prompt = f"""你是一个化学专家，现在需要整合多个AI模型对同一化学问题的回答，生成一个最优的综合答案。
+
+原始问题：{question}
+
+各模型回答：
+"""
+        
+        # 添加各模型的回答（已经过清理和格式化）
+        for model_name, result in successful_results.items():
+            prompt += f"\n**{model_name} 模型回答：**\n{result['answer']}\n\n---\n"
+        
+        prompt += """
+请基于以上多个模型的回答，生成一个综合的、最优的答案。
+
+**严格的输出格式要求：**
+1. **化学公式格式化**：
+   - 所有化学分子式必须使用下标格式：H₂O、CH₄、C₂H₄、H₂SO₄、CaCO₃等
+   - 离子公式使用上下标：Ca²⁺、SO₄²⁻、OH⁻等
+   - 绝对禁止使用H2O、CH4、C2H4等普通数字格式
+
+2. **化学反应方程式**：
+   - 使用标准反应箭头：→（而非->或=>）
+   - 完整格式示例：CH₄ + 2O₂ → CO₂ + 2H₂O
+   - 可逆反应使用：⇌
+   - 条件标注在箭头上方或下方
+
+3. **Markdown结构**：
+   - 使用清晰的标题层级（##、###）
+   - 重要步骤使用有序列表
+   - 关键概念使用**粗体**强调
+   - 计算过程使用代码块或表格展示
+
+4. **数学公式**：
+   - 复杂计算使用LaTeX格式：$\\Delta H = \\sum H_{{products}} - \\sum H_{{reactants}}$
+   - 简单数值计算直接显示：25°C、1.5 mol、98.5%
+
+5. **内容组织**：
+   - 问题分析 → 解题思路 → 详细步骤 → 最终答案 → 知识点总结
+   - 每个化学现象都要有科学解释
+   - 重要的化学原理要单独说明
+
+**综合答案：**
+请严格按照上述格式要求输出综合答案，确保所有化学公式都使用正确的下标格式，所有反应箭头都使用标准符号。
 """
         
         return prompt
@@ -938,6 +1091,97 @@ class ChemistryAnalysisChain:
                 'chain_summary': ''
             }
     
+    def classify_question(self, question: str) -> str:
+        """
+        问题分类方法
+        
+        Args:
+            question: 化学问题
+            
+        Returns:
+            str: 分类结果
+        """
+        try:
+            self.logger.info(f"开始分类问题: {question[:50]}...")
+            prompt_text = self.classification_prompt.format(question=question)
+            self.logger.debug(f"分类提示文本已生成，长度: {len(prompt_text)}")
+            messages = [HumanMessage(content=prompt_text)]
+            
+            # 选择最佳模型
+            model_name = self._select_best_model(['qwen3', 'deepseek-r1', 'wenxin4.5'])
+            if not model_name:
+                return "分类失败：没有可用的模型"
+            
+            result = self.llm_manager.call_model(model_name, messages)
+            return result if result else "分类失败"
+            
+        except Exception as e:
+            self.logger.error(f"问题分类失败: {str(e)}")
+            return f"分类失败: {str(e)}"
+    
+    def analyze_question(self, question: str, classification: str) -> str:
+        """
+        多角度分析方法
+        
+        Args:
+            question: 化学问题
+            classification: 分类结果
+            
+        Returns:
+            str: 分析结果
+        """
+        try:
+            self.logger.info(f"开始分析问题: {question[:50]}...")
+            prompt_text = self.analysis_prompt.format(question=question, classification=classification)
+            self.logger.debug(f"分析提示文本已生成，长度: {len(prompt_text)}")
+            messages = [HumanMessage(content=prompt_text)]
+            
+            # 选择最佳模型
+            model_name = self._select_best_model(['qwen3', 'deepseek-r1', 'wenxin4.5'])
+            if not model_name:
+                return "分析失败：没有可用的模型"
+            
+            result = self.llm_manager.call_model(model_name, messages)
+            return result if result else "分析失败"
+            
+        except Exception as e:
+            self.logger.error(f"问题分析失败: {str(e)}")
+            return f"分析失败: {str(e)}"
+    
+    def generate_solution(self, question: str, classification: str, analysis: str) -> str:
+        """
+        生成解答方法
+        
+        Args:
+            question: 化学问题
+            classification: 分类结果
+            analysis: 分析结果
+            
+        Returns:
+            str: 解答结果
+        """
+        try:
+            self.logger.info(f"开始生成解答: {question[:50]}...")
+            prompt_text = self.solution_prompt.format(
+                question=question, 
+                classification=classification, 
+                analysis=analysis
+            )
+            self.logger.debug(f"解答提示文本已生成，长度: {len(prompt_text)}")
+            messages = [HumanMessage(content=prompt_text)]
+            
+            # 选择最佳模型
+            model_name = self._select_best_model(['qwen3', 'deepseek-r1', 'wenxin4.5'])
+            if not model_name:
+                return "解答失败：没有可用的模型"
+            
+            result = self.llm_manager.call_model(model_name, messages)
+            return result if result else "解答失败"
+            
+        except Exception as e:
+            self.logger.error(f"生成解答失败: {str(e)}")
+            return f"解答失败: {str(e)}"
+
     def _select_best_model(self, preferred_models: List[str]) -> str:
         """
         选择最佳可用模型

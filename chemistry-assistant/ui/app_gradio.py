@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import MODEL_CONFIG, UI_CONFIG
 from utils.output_cleaner import output_cleaner
+from utils.web_ui_formatter import clean_and_format_output, format_comparison_output, format_chain_result, format_error_message, format_status_message
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -157,68 +158,8 @@ def update_loading_status(status):
     """更新加载状态"""
     return f"<div style='text-align: center; color: #666;'>{status}</div>"
 
-def clean_and_format_output(raw_output):
-    """
-    一个统一的函数，用于清理、解析和格式化模型的原始输出。
-    """
-    if not raw_output:
-        return ""
-
-    # 1. 解析输入：处理JSON字符串、Python字面量或普通字符串
-    data = None
-    if isinstance(raw_output, str):
-        try:
-            data = json.loads(raw_output)
-        except (json.JSONDecodeError, TypeError):
-            try:
-                data = ast.literal_eval(raw_output)
-            except (ValueError, SyntaxError, TypeError):
-                data = raw_output # 保持为字符串
-    else:
-        data = raw_output
-
-    # 2. 提取核心答案
-    answer = data
-    if isinstance(data, dict):
-        answer = data.get('integrated_answer') or data.get('answer') or data.get('error') or data.get('solution') or data
-
-    # 3. 格式化答案以供显示
-    if isinstance(answer, dict):
-        # 如果是字典，美化为JSON字符串
-        formatted_answer = f"```json\n{json.dumps(answer, indent=2, ensure_ascii=False)}\n```"
-    elif isinstance(answer, list):
-        # 如果是列表，每项占一行
-        formatted_answer = "\n".join(map(str, answer))
-    else:
-        # 其他情况，转为字符串
-        formatted_answer = str(answer)
-
-    # 4. 清理最终的文本
-    # 使用专业的输出清理器
-    cleaned_text = output_cleaner.clean_model_response(formatted_answer)
-    
-    # 额外的乱码和格式修复
-    cleaned_text = re.sub(r'\Double subscripts: use braces to clarify', '', cleaned_text)
-    cleaned_text = re.sub(r'Extra close brace or missing open brace', '', cleaned_text)
-    cleaned_text = re.sub(r'\\ce\{([^}]+)\}', r'\1', cleaned_text)
-    cleaned_text = re.sub(r'\$+([^$]*?)\$+', r'$\1$', cleaned_text)
-    cleaned_text = re.sub(r'H2O', r'H₂O', cleaned_text)
-    cleaned_text = re.sub(r'O2', r'O₂', cleaned_text)
-    cleaned_text = re.sub(r'H2', r'H₂', cleaned_text)
-    cleaned_text = re.sub(r'CO2', r'CO₂', cleaned_text)
-    cleaned_text = re.sub(r'SO2', r'SO₂', cleaned_text)
-    cleaned_text = re.sub(r'NO2', r'NO₂', cleaned_text)
-    cleaned_text = re.sub(r'\rightarrow', r'→', cleaned_text)
-    cleaned_text = re.sub(r'\to', r'→', cleaned_text)
-    cleaned_text = re.sub(r'->', r'→', cleaned_text)
-
-    # 确保UTF-8编码正确
-    try:
-        cleaned_text = cleaned_text.encode('utf-8').decode('utf-8')
-    except UnicodeError:
-        cleaned_text = ''.join(char for char in cleaned_text if ord(char) < 65536)
-
-    return cleaned_text
+# clean_and_format_output函数已移至utils/web_ui_formatter.py模块
+# 现在直接使用导入的函数
 
 def start_ui(controller=None):
     """
@@ -350,10 +291,10 @@ def start_ui(controller=None):
                 chain = ""
 
             progress(0.7, desc="正在格式化结果...")
-            # 使用统一的清理函数处理所有输出
+            # 使用专门的格式化函数处理不同类型的输出
             cleaned_answer = clean_and_format_output(answer)
-            cleaned_comparison = clean_and_format_output(comp)
-            cleaned_chain_result = clean_and_format_output(chain)
+            cleaned_comparison = format_comparison_output(comp)
+            cleaned_chain_result = format_chain_result(chain)
             
             # 构建检索状态信息
             adaptive_status = ""
@@ -422,21 +363,123 @@ def start_ui(controller=None):
                 comp = comparison
                 chain = ""
 
-            # 使用统一的清理函数处理所有输出
+            # 使用专门的格式化函数处理不同类型的输出
             cleaned_answer = clean_and_format_output(answer)
-            cleaned_comparison = clean_and_format_output(comp)
-            cleaned_chain_result = clean_and_format_output(chain)
+            cleaned_comparison = format_comparison_output(comp)
+            cleaned_chain_result = format_chain_result(chain)
 
             return cleaned_answer, cleaned_comparison, cleaned_chain_result
                 
         except Exception as e:
-            return f"处理出错：{str(e)}", "", ""
+            error_msg = format_error_message(e, "问题处理")
+            return error_msg, "", ""
     
     # 创建Gradio界面
     with gr.Blocks(
         title="🧪 化学助手", 
         theme=gr.themes.Soft(),
         head="""
+        <style>
+        /* 表格样式优化 - 解决方程式显示问题 */
+        .markdown-body table {
+            width: 100%;
+            table-layout: auto;
+            border-collapse: collapse;
+            margin: 1em 0;
+            overflow-x: auto;
+        }
+        
+        .markdown-body table td, .markdown-body table th {
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            text-align: left;
+            vertical-align: top;
+            word-wrap: break-word;
+            white-space: normal;
+            min-width: 0;
+        }
+        
+        /* 化学方程式样式 */
+        .chemical-equation {
+            white-space: nowrap;
+            display: inline-block;
+            font-family: 'Courier New', monospace;
+            background-color: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid #e9ecef;
+            font-size: 0.95em;
+            overflow-x: auto;
+            max-width: 100%;
+        }
+        
+        /* 特别处理方程式列 - 确保化学方程式在一行显示 */
+        .markdown-body table td:nth-child(2) {
+            white-space: nowrap;
+            overflow-x: auto;
+            max-width: 400px;
+            font-family: 'Times New Roman', serif;
+        }
+        
+        /* 确保化学方程式在表格中正确显示 */
+        .markdown-body table .chemical-equation {
+            font-family: 'Courier New', monospace;
+            white-space: nowrap;
+        }
+        
+        /* 包含化学方程式的表格单元格 */
+        .markdown-body table td:has(.chemical-equation) {
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+        
+        /* 表格容器滚动 */
+        .markdown-body {
+            overflow-x: auto;
+        }
+        
+        /* 响应式表格 */
+        @media (max-width: 768px) {
+            .markdown-body table {
+                font-size: 0.9em;
+            }
+            .markdown-body table td:nth-child(2) {
+                max-width: 300px;
+            }
+            
+            .chemical-equation {
+                font-size: 0.85em;
+                max-width: 200px;
+            }
+        }
+        
+        /* 表格滚动条样式 */
+        .markdown-body table td:nth-child(2)::-webkit-scrollbar,
+        .chemical-equation::-webkit-scrollbar {
+            height: 4px;
+        }
+        
+        .markdown-body table td:nth-child(2)::-webkit-scrollbar-track,
+        .chemical-equation::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        .markdown-body table td:nth-child(2)::-webkit-scrollbar-thumb,
+        .chemical-equation::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 2px;
+        }
+        
+        .markdown-body table td:nth-child(2)::-webkit-scrollbar-thumb:hover,
+        .chemical-equation::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        /* 强制表格内容不换行 */
+        .markdown-body table td:nth-child(2) * {
+            white-space: nowrap !important;
+        }
+        </style>
         <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
         <script id=\"MathJax-script\" async src=\"https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js\"></script>
         <script>
