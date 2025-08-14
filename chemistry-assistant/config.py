@@ -44,7 +44,7 @@ MODEL_CONFIG = {
     # DeepSeek模型配置（通过通义API调用）
     'deepseek': {
         'api_key': 'sk-df1f72de49554dfab781d878a7530a91',  # 阿里云百炼/通义密钥
-        'model': 'deepseek-r1',
+        'model': 'deepseek-v3',
     },
     
     # GLM-4-Plus模型配置（用于结果融合）

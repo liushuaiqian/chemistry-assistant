@@ -12,6 +12,7 @@ from .multimodal_processor import MultimodalProcessor
 from .llm_manager import LLMManager
 from .chemistry_chain import ChemistryAnalysisChain
 from tools.knowledge_api import KnowledgeAPI
+from agents.tools_agent import ToolsAgent
 
 class Controller:
     """
@@ -55,6 +56,11 @@ class Controller:
             self.knowledge_api = KnowledgeAPI()
             self.logger.info("知识库API初始化成功")
             
+            # 初始化化学工具Agent（用于程序化化学计算）
+            self.logger.info("初始化化学工具Agent...")
+            self.tools_agent = ToolsAgent()
+            self.logger.info("化学工具Agent初始化成功")
+            
             # 初始化Agent管理器（暂时跳过知识库相关功能）
             self.logger.info("初始化Agent管理器...")
             try:
@@ -93,6 +99,44 @@ class Controller:
         # 初始化任务信息
         if task_info is None:
             task_info = {}
+        
+        # 针对“化学计算”功能，优先走程序化工具链（即使存在图像输入）
+        try:
+            function_choice = task_info.get('function', '')
+        except Exception:
+            function_choice = ''
+        
+        if function_choice == "化学计算":
+            # 仅当文本为空且存在图像时，退回到多模态识别
+            if (not query or not str(query).strip()) and task_info.get('image') is not None:
+                try:
+                    import base64
+                    from io import BytesIO
+                    from PIL import Image
+
+                    image_pil = task_info['image']
+                    if not isinstance(image_pil, Image.Image):
+                        return "图像格式不支持，请上传有效的图片文件。", ""
+                    buffered = BytesIO()
+                    if image_pil.mode != 'RGB':
+                        image_pil = image_pil.convert('RGB')
+                    image_pil.save(buffered, format="JPEG", quality=85)
+                    img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                    response = self.multimodal_processor.process_image_and_text(img_str, "请识别图像中的化学内容并提取关键信息")
+                    return response, "已通过视觉模块识别图像，但化学计算建议提供明确的文本描述以获得更准确结果"
+                except Exception as e:
+                    self.logger.error(f"化学计算图像识别失败: {e}")
+                    return f"图像处理失败: {str(e)}", ""
+            
+            # 使用化学工具Agent处理文本化学计算
+            try:
+                result = self.tools_agent.process(query, task_info)
+                return result, "化学计算由程序化工具完成"
+            except Exception as e:
+                self.logger.error(f"化学计算处理失败: {e}")
+                return f"化学计算处理失败: {str(e)}", ""
+        
+        # 非“化学计算”则保持原有逻辑
         
         # 检查任务信息中是否包含图像
         if task_info and 'image' in task_info and task_info['image'] is not None:

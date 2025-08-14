@@ -719,5 +719,245 @@
     "image_path": false,
     "question_length": 151,
     "answer_length": 924
+  },
+  {
+    "id": "1755152070524_73",
+    "timestamp": "2025-08-14T14:14:30.524261",
+    "question": "计算H2O的摩尔质量",
+    "answer": "O的摩尔质量为: 15.9990 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 10,
+    "answer_length": 23
+  },
+  {
+    "id": "1755152085686_74",
+    "timestamp": "2025-08-14T14:14:45.686927",
+    "question": "计算H2O的摩尔质量",
+    "answer": "O的摩尔质量为: 15.9990 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 10,
+    "answer_length": 23
+  },
+  {
+    "id": "1755152087071_75",
+    "timestamp": "2025-08-14T14:14:47.071335",
+    "question": "计算H2O的摩尔质量",
+    "answer": "O的摩尔质量为: 15.9990 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 10,
+    "answer_length": 23
+  },
+  {
+    "id": "1755152095138_76",
+    "timestamp": "2025-08-14T14:14:55.138399",
+    "question": "平衡化学方程式：H2 + O2 = H2O",
+    "answer": "平衡方程式时出错: Cannot convert symbols to int\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 21,
+    "answer_length": 40
+  },
+  {
+    "id": "1755152101622_77",
+    "timestamp": "2025-08-14T14:15:01.622938",
+    "question": "计算H2O的摩尔质量",
+    "answer": "O的摩尔质量为: 15.9990 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 10,
+    "answer_length": 23
+  },
+  {
+    "id": "1755152139315_78",
+    "timestamp": "2025-08-14T14:15:39.315400",
+    "question": "计算H2O的摩尔质量",
+    "answer": "O的摩尔质量为: 15.9990 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 10,
+    "answer_length": 23
+  },
+  {
+    "id": "1755152150449_79",
+    "timestamp": "2025-08-14T14:15:50.449712",
+    "question": "计算甲烷的摩尔质量",
+    "answer": "未能识别化学式，请明确指定要计算摩尔质量的化合物\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 9,
+    "answer_length": 25
+  },
+  {
+    "id": "1755152649148_80",
+    "timestamp": "2025-08-14T14:24:09.148419",
+    "question": "计算甲烷的相对原子质量",
+    "answer": "甲烷（CH₄）的摩尔质量为: 16.0430 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 11,
+    "answer_length": 29
+  },
+  {
+    "id": "1755156288601_81",
+    "timestamp": "2025-08-14T15:24:48.601463",
+    "question": "计算乙烯的分子质量",
+    "answer": "C₂H4的摩尔质量为: 28.0540 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 9,
+    "answer_length": 26
+  },
+  {
+    "id": "1755156313135_82",
+    "timestamp": "2025-08-14T15:25:13.135492",
+    "question": "计算乙酸乙酯的分子质量",
+    "answer": "C₄H₈O2的摩尔质量为: 88.1060 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 11,
+    "answer_length": 28
+  },
+  {
+    "id": "1755156396806_83",
+    "timestamp": "2025-08-14T15:26:36.806835",
+    "question": "计算硫化氢的分子质量",
+    "answer": "H₂S的摩尔质量为: 34.0810 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 10,
+    "answer_length": 25
+  },
+  {
+    "id": "1755156424021_84",
+    "timestamp": "2025-08-14T15:27:04.021648",
+    "question": "计算三氧化二铁的分子质量",
+    "answer": "Fe₂O3的摩尔质量为: 159.6870 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 12,
+    "answer_length": 28
+  },
+  {
+    "id": "1755156636961_85",
+    "timestamp": "2025-08-14T15:30:36.961015",
+    "question": "计算四氧化三铁的分子质量",
+    "answer": "Fe₃O4的摩尔质量为: 231.5310 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 12,
+    "answer_length": 28
+  },
+  {
+    "id": "1755156942328_86",
+    "timestamp": "2025-08-14T15:35:42.328991",
+    "question": "计算甲苯的分子质量",
+    "answer": "C₇H8的摩尔质量为: 92.1410 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 9,
+    "answer_length": 26
+  },
+  {
+    "id": "1755156981823_87",
+    "timestamp": "2025-08-14T15:36:21.823674",
+    "question": "计算高猛酸钾的分子质量",
+    "answer": "KMnO4的摩尔质量为: 158.0320 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 11,
+    "answer_length": 28
+  },
+  {
+    "id": "1755158417932_88",
+    "timestamp": "2025-08-14T16:00:17.932748",
+    "question": "计算氢氧化钙的分子质量",
+    "answer": "Ca(OH)2的摩尔质量为: 57.0000 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 11,
+    "answer_length": 29
+  },
+  {
+    "id": "1755158450282_89",
+    "timestamp": "2025-08-14T16:00:50.282321",
+    "question": "计算Ca(OH)2的分子质量",
+    "answer": "Ca(OH)2的摩尔质量为: 57.0000 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 14,
+    "answer_length": 29
+  },
+  {
+    "id": "1755158553104_90",
+    "timestamp": "2025-08-14T16:02:33.104935",
+    "question": "计算Al2(SO4)3的分子质量",
+    "answer": "Al2(SO4)3的摩尔质量为: 150.0000 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 16,
+    "answer_length": 32
+  },
+  {
+    "id": "1755158589199_91",
+    "timestamp": "2025-08-14T16:03:09.199225",
+    "question": "计算硫酸铝的分子质量",
+    "answer": "Al2(SO4)3的摩尔质量为: 150.0000 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 10,
+    "answer_length": 32
+  },
+  {
+    "id": "1755158684695_92",
+    "timestamp": "2025-08-14T16:04:44.695537",
+    "question": "计算氢氧化钙的分子质量",
+    "answer": "Ca(OH)2的摩尔质量为: 57.0000 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 11,
+    "answer_length": 29
+  },
+  {
+    "id": "1755160583816_93",
+    "timestamp": "2025-08-14T16:36:23.816314",
+    "question": "氢氧化钙分子质量",
+    "answer": "Ca(OH)2的摩尔质量为: 74.0000 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 8,
+    "answer_length": 29
+  },
+  {
+    "id": "1755172602586_94",
+    "timestamp": "2025-08-14T19:56:42.586424",
+    "question": "计算氢氧化钙的相对原子质量",
+    "answer": "Ca(OH)2的摩尔质量为: 74.0000 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 13,
+    "answer_length": 29
+  },
+  {
+    "id": "1755172626632_95",
+    "timestamp": "2025-08-14T19:57:06.632471",
+    "question": "计算氢氧化钙的相对原子质量",
+    "answer": "Ca(OH)2的摩尔质量为: 74.0000 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 13,
+    "answer_length": 29
+  },
+  {
+    "id": "1755172663803_96",
+    "timestamp": "2025-08-14T19:57:43.804091",
+    "question": "Al2(SO4)3的相对原子质量",
+    "answer": "Al2(SO4)3的摩尔质量为: 342.0000 g/mol\n",
+    "function_type": "化学计算",
+    "image_path": false,
+    "question_length": 16,
+    "answer_length": 32
   }
 ]
