@@ -70,6 +70,17 @@ class LLMManager:
                 )
                 self.logger.info("智谱AI模型初始化成功")
             
+            # 初始化硅基流动模型（通过OpenAI兼容接口）
+            if 'siliconflow' in MODEL_CONFIG and MODEL_CONFIG['siliconflow'].get('api_key'):
+                self.models['siliconflow'] = ChatOpenAI(
+                    api_key=MODEL_CONFIG['siliconflow']['api_key'],
+                    base_url=MODEL_CONFIG['siliconflow'].get('api_base', 'https://api.siliconflow.cn/v1'),
+                    model=MODEL_CONFIG['siliconflow'].get('model', 'baidu/ERNIE-4.5-300B-A47B'),
+                    temperature=0.7,
+                    max_tokens=8000
+                )
+                self.logger.info("硅基流动模型初始化成功")
+            
             # 初始化DeepSeek模型（通过通义接口）
             if 'deepseek' in MODEL_CONFIG and MODEL_CONFIG['deepseek'].get('api_key'):
                 self.models['deepseek'] = ChatTongyi(
@@ -118,6 +129,12 @@ class LLMManager:
                 # 这里只是标记模型可用，实际调用会使用专门的API接口
                 self.models['ernie_vl'] = 'vision_multimodal'  # 特殊标记
                 self.logger.info("ERNIE 4.5 Turbo VL视觉多模态模型初始化成功")
+            
+            # 初始化智谱视觉模型
+            if 'zhipu_vision' in MODEL_CONFIG and MODEL_CONFIG['zhipu_vision'].get('api_key'):
+                # 智谱视觉模型，使用专门的API接口
+                self.models['zhipu_vision'] = 'vision_multimodal'  # 特殊标记
+                self.logger.info("智谱视觉模型初始化成功")
                 
         except Exception as e:
             self.logger.error(f"模型初始化失败: {str(e)}")
@@ -422,3 +439,96 @@ class LLMManager:
         except Exception as e:
             self.logger.error(f"[ERNIE VL] 调用异常: {str(e)}")
             return f"错误: ERNIE VL模型调用异常 - {str(e)}"
+    
+    def call_zhipu_vision(self, question: str, image_data: Union[str, bytes]) -> str:
+        """
+        调用智谱视觉模型 glm-4.5v
+        
+        Args:
+            question: 文本问题
+            image_data: 图片数据（base64编码或字节数据）
+            
+        Returns:
+            str: 模型回答
+        """
+        try:
+            # 获取配置
+            zhipu_vision_config = MODEL_CONFIG.get('zhipu_vision', {})
+            if not zhipu_vision_config.get('api_key'):
+                return "错误: 智谱视觉模型API密钥未配置"
+            
+            # 处理图片数据
+            if isinstance(image_data, bytes):
+                # 如果是字节数据，转换为base64
+                encoded = base64.b64encode(image_data).decode("utf-8")
+                image_b64 = encoded
+            elif isinstance(image_data, str) and image_data.startswith('data:image'):
+                # 如果已经是完整的data URL格式，提取base64部分
+                image_b64 = image_data.split(',')[1]
+            elif isinstance(image_data, str):
+                # 如果是纯base64字符串，直接使用
+                image_b64 = image_data
+            else:
+                # 如果是文件路径，尝试读取并转换
+                try:
+                    with open(str(image_data), "rb") as f:
+                        data = f.read()
+                    encoded = base64.b64encode(data).decode("utf-8")
+                    image_b64 = encoded
+                except Exception as e:
+                    self.logger.error(f"[智谱视觉] 无法读取图片文件: {str(e)}")
+                    return f"错误: 无法处理图片数据 - {str(e)}"
+            
+            # 导入智谱AI客户端
+            try:
+                from zhipuai import ZhipuAI
+            except ImportError:
+                self.logger.error("[智谱视觉] 缺少zhipuai库，请安装: pip install zhipuai")
+                return "错误: 缺少zhipuai库，请安装: pip install zhipuai"
+            
+            # 初始化客户端
+            client = ZhipuAI(api_key=zhipu_vision_config['api_key'])
+            
+            # 构建消息
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_b64}"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": question
+                        }
+                    ]
+                }
+            ]
+            
+            self.logger.info(f"[智谱视觉] 开始调用视觉模型...")
+            
+            # 调用模型
+            response = client.chat.completions.create(
+                model=zhipu_vision_config.get('model', 'glm-4.5v'),
+                messages=messages,
+                thinking={
+                    "type": "enabled"  # 开启深度思考模式
+                },
+                stream=False,  # 非流式输出
+                max_tokens=4096
+            )
+            
+            if response.choices and len(response.choices) > 0:
+                content = response.choices[0].message.content
+                self.logger.info(f"[智谱视觉] 调用成功，响应长度: {len(content)}")
+                return clean_output(content)
+            else:
+                self.logger.error(f"[智谱视觉] 响应格式异常: {response}")
+                return "错误: 智谱视觉模型响应格式异常"
+                
+        except Exception as e:
+            self.logger.error(f"[智谱视觉] 调用异常: {str(e)}")
+            return f"错误: 智谱视觉模型调用异常 - {str(e)}"

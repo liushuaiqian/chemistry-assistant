@@ -70,10 +70,10 @@ class ChemistryAnalysisChain:
         self.enable_adaptive = enable_adaptive
         
         # 初始化视觉模型配置
-        self.vision_config = MODEL_CONFIG.get('tongyi_vision', {})
+        self.vision_config = MODEL_CONFIG.get('zhipu_vision', {})
         
         # 配置并行处理的模型列表
-        self.parallel_models = ['tongyi', 'deepseek', 'qianfan', 'ernie_x1']  # qwen3通过tongyi调用，deepseek-r1，新增ERNIE-X1-Turbo-32K
+        self.parallel_models = ['tongyi', 'deepseek', 'siliconflow', 'ernie_x1']  # qwen3通过tongyi调用，deepseek-r1，硅基流动模型，新增ERNIE-X1-Turbo-32K
         
         # 初始化线程池用于并行处理
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max(4, len(self.parallel_models)))
@@ -206,7 +206,7 @@ class ChemistryAnalysisChain:
     
     def extract_text_from_image(self, image_data: Union[str, bytes], image_format: str = 'jpeg') -> str:
         """
-        使用qwen视觉模型从图像中提取文本内容
+        使用智谱视觉模型从图像中提取文本内容
         
         Args:
             image_data: 图像数据（base64字符串或字节数据）
@@ -228,75 +228,19 @@ class ChemistryAnalysisChain:
             
             # 检查视觉模型配置
             if not self.vision_config.get('api_key'):
-                self.logger.error("qwen视觉模型API密钥未配置")
+                self.logger.error("智谱视觉模型API密钥未配置")
                 return "视觉模型未配置，无法识别图片内容。"
             
-            # 构建请求
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.vision_config['api_key']}"
-            }
+            # 使用LLM管理器调用智谱视觉模型
+            question = "请仔细分析这张图片中的化学题目，提取完整的题干内容。如果图片中包含化学方程式、分子式或其他化学符号，请准确识别并转录，并使用MathJax格式表示化学公式，例如：$H_2SO_4$、$$2H_2 + O_2 \\rightarrow 2H_2O$$。"
             
-            data = {
-                "model": self.vision_config.get('model', 'qwen-vl-plus'),
-                "input": {
-                    "messages": [
-                        {
-                            "role": "system", 
-                            "content": [{
-                                "text": "你是一个专业的化学助手，擅长识别和分析化学题目。请仔细识别图片中的所有文字内容，特别是化学公式、方程式和数值。在识别化学公式时使用MathJax格式，例如：$H_2SO_4$、$CaCO_3$等。"
-                            }]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {"image": f"data:image/{image_format};base64,{image_base64}"},
-                                {"text": "请仔细分析这张图片中的化学题目，提取完整的题干内容。如果图片中包含化学方程式、分子式或其他化学符号，请准确识别并转录，并使用MathJax格式表示化学公式，例如：$H_2SO_4$、$$2H_2 + O_2 \\rightarrow 2H_2O$$。"}
-                            ]
-                        }
-                    ]
-                },
-                "parameters": {
-                    "temperature": 0.1,
-                    "top_p": 0.8
-                }
-            }
+            extracted_text = self.llm_manager.call_zhipu_vision(question, image_data)
             
-            # 调用qwen视觉API
-            response = requests.post(
-                "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
-                headers=headers,
-                json=data,
-                timeout=60
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                # 解析响应内容
-                content = result["output"]["choices"][0]["message"]["content"]
-                extracted_text = ""
-                
-                if isinstance(content, list) and len(content) > 0:
-                    # 查找text类型的内容
-                    for item in content:
-                        if isinstance(item, dict) and "text" in item:
-                            extracted_text = item["text"]
-                            break
-                    # 如果没有找到text字段，返回第一个字符串内容
-                    if not extracted_text:
-                        for item in content:
-                            if isinstance(item, str):
-                                extracted_text = item
-                                break
-                elif isinstance(content, str):
-                    extracted_text = content
-                else:
-                    extracted_text = str(content)
-                
-                self.logger.info(f"视觉模型成功识别图片内容: {extracted_text[:100]}...")
+            if extracted_text and not extracted_text.startswith("错误:"):
+                self.logger.info(f"智谱视觉模型成功识别图片内容: {extracted_text[:100]}...")
                 return extracted_text
             else:
-                self.logger.error(f"qwen视觉模型API错误: {response.status_code} - {response.text}")
+                self.logger.error(f"智谱视觉模型识别失败: {extracted_text}")
                 return "图像识别失败，请重新上传或输入文字题目。"
                 
         except Exception as e:
@@ -445,8 +389,8 @@ class ChemistryAnalysisChain:
         # 确定要调用的模型列表
         models_to_call = self.parallel_models.copy()
         if has_image and image_data:
-            models_to_call.append('ernie_vl')  # 有图片时增加ERNIE VL模型
-            self.logger.info("[并行调用] 检测到图片输入，增加ERNIE VL视觉模型")
+            models_to_call.append('zhipu_vision')  # 有图片时增加智谱视觉模型
+            self.logger.info("[并行调用] 检测到图片输入，增加智谱视觉模型")
         
         self.logger.info(f"[并行调用] 开始并行调用 {len(models_to_call)} 个模型")
         
@@ -455,15 +399,15 @@ class ChemistryAnalysisChain:
         results = {}
         
         for model_name in models_to_call:
-            if model_name == 'ernie_vl':
-                # 特殊处理ERNIE VL模型
+            if model_name == 'zhipu_vision':
+                # 特殊处理智谱视觉模型
                 if has_image and image_data:
                     try:
-                        future = self.executor.submit(self._ernie_vl_process, question, image_data)
+                        future = self.executor.submit(self._zhipu_vision_process, question, image_data)
                         future_to_model[future] = model_name
-                        self.logger.info(f"[并行调用] 已提交ERNIE VL视觉模型的处理任务")
+                        self.logger.info(f"[并行调用] 已提交智谱视觉模型的处理任务")
                     except Exception as e:
-                        self.logger.error(f"[并行调用] 提交ERNIE VL模型任务失败: {str(e)}")
+                        self.logger.error(f"[并行调用] 提交智谱视觉模型任务失败: {str(e)}")
                         results[model_name] = {
                             'error': f"任务提交失败: {str(e)}",
                             'answer': '',
@@ -562,30 +506,32 @@ class ChemistryAnalysisChain:
         self.logger.info(f"[并行调用] 完成，成功: {successful_count}/{len(results)}")
         return results
     
-    def _ernie_vl_process(self, question: str, image_data: Union[str, bytes]) -> Dict[str, Any]:
+
+    
+    def _zhipu_vision_process(self, question: str, image_data: Union[str, bytes]) -> Dict[str, Any]:
         """
-        ERNIE VL视觉模型的处理逻辑
+        智谱视觉模型的处理逻辑
         
         Args:
             question: 问题文本
             image_data: 图片数据
             
         Returns:
-            Dict[str, Any]: ERNIE VL模型的处理结果
+            Dict[str, Any]: 智谱视觉模型的处理结果
         """
         import time
         start_time = time.time()
         
         try:
-            self.logger.info("[ERNIE VL] 开始处理视觉问题")
+            self.logger.info("[智谱视觉] 开始处理视觉问题")
             
-            # 调用ERNIE VL模型
-            result = self.llm_manager.call_ernie_vl(question, image_data)
+            # 调用智谱视觉模型
+            result = self.llm_manager.call_zhipu_vision(question, image_data)
             
             processing_time = time.time() - start_time
             
-            if result and 'error' not in result:
-                self.logger.info(f"[ERNIE VL] 处理成功，耗时: {processing_time:.2f}秒")
+            if result and not result.startswith('错误:'):
+                self.logger.info(f"[智谱视觉] 处理成功，耗时: {processing_time:.2f}秒")
                 return {
                     'answer': result,
                     'processing_time': processing_time,
@@ -593,10 +539,10 @@ class ChemistryAnalysisChain:
                     'model_type': 'vision_multimodal'
                 }
             else:
-                error_msg = result.get('error', '未知错误') if result else '返回结果为空'
-                self.logger.error(f"[ERNIE VL] 处理失败: {error_msg}")
+                error_msg = result if result else '返回结果为空'
+                self.logger.error(f"[智谱视觉] 处理失败: {error_msg}")
                 return {
-                    'error': f"ERNIE VL处理失败: {error_msg}",
+                    'error': f"智谱视觉处理失败: {error_msg}",
                     'answer': '',
                     'processing_time': processing_time,
                     'success': False,
@@ -605,9 +551,9 @@ class ChemistryAnalysisChain:
                 
         except Exception as e:
             processing_time = time.time() - start_time
-            self.logger.error(f"[ERNIE VL] 处理异常: {str(e)}")
+            self.logger.error(f"[智谱视觉] 处理异常: {str(e)}")
             return {
-                'error': f"ERNIE VL处理异常: {str(e)}",
+                'error': f"智谱视觉处理异常: {str(e)}",
                 'answer': '',
                 'processing_time': processing_time,
                 'success': False,

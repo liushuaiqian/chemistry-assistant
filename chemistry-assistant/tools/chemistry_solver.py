@@ -65,7 +65,7 @@ class ChemistrySolver:
     
     def balance_equation(self, equation):
         """
-        平衡化学方程式（使用简化的试错法）
+        平衡化学方程式（使用矩阵求解法）
         
         Args:
             equation (str): 未平衡的化学方程式，如 'H2 + O2 = H2O'
@@ -77,13 +77,13 @@ class ChemistrySolver:
             # 解析方程式
             reactants, products = self._parse_equation(equation)
             
-            # 使用预定义的常见方程式配平结果
+            # 使用预定义的常见方程式配平结果（快速匹配）
             balanced = self._try_common_balancing(equation, reactants, products)
             if balanced:
                 return balanced
             
-            # 如果不是常见方程式，尝试简单的试错法
-            return self._simple_balance_attempt(equation, reactants, products)
+            # 使用矩阵求解法进行通用配平
+            return self._matrix_balance_equation(equation, reactants, products)
             
         except Exception as e:
             print(f"方程式配平失败: {e}")
@@ -103,15 +103,20 @@ class ChemistrySolver:
         """
         # 常见方程式的配平结果
         common_equations = {
-            'H2 + O2 = H2O': '2H2 + O2 = 2H2O',
-            'Fe + O2 = Fe2O3': '4Fe + 3O2 = 2Fe2O3',
-            'Al + HCl = AlCl3 + H2': '2Al + 6HCl = 2AlCl3 + 3H2',
-            'C2H6 + O2 = CO2 + H2O': '2C2H6 + 7O2 = 4CO2 + 6H2O',
-            'NH3 + O2 = NO + H2O': '4NH3 + 5O2 = 4NO + 6H2O',
-            'C + O2 = CO2': 'C + O2 = CO2',
-            'Mg + O2 = MgO': '2Mg + O2 = 2MgO',
-            'Ca + H2O = Ca(OH)2 + H2': 'Ca + 2H2O = Ca(OH)2 + H2',
-            'NaCl + AgNO3 = AgCl + NaNO3': 'NaCl + AgNO3 = AgCl + NaNO3'
+            'H2 + O2 = H2O': '2H2 + O2 → 2H2O',
+            'Fe + O2 = Fe2O3': '4Fe + 3O2 → 2Fe2O3',
+            'Al + HCl = AlCl3 + H2': '2Al + 6HCl → 2AlCl3 + 3H2',
+            'C2H6 + O2 = CO2 + H2O': '2C2H6 + 7O2 → 4CO2 + 6H2O',
+            'NH3 + O2 = NO + H2O': '4NH3 + 5O2 → 4NO + 6H2O',
+            'C + O2 = CO2': 'C + O2 → CO2',
+            'Mg + O2 = MgO': '2Mg + O2 → 2MgO',
+            'Ca + H2O = Ca(OH)2 + H2': 'Ca + 2H2O → Ca(OH)2 + H2',
+            'NaCl + AgNO3 = AgCl + NaNO3': 'NaCl + AgNO3 → AgCl + NaNO3',
+            # 氧化还原反应
+            'KMnO4 + HCl = MnCl2 + Cl2 + KCl + H2O': '2KMnO4 + 16HCl → 2MnCl2 + 5Cl2↑ + 2KCl + 8H2O',
+            'KMnO₄ + HCl = MnCl₂ + Cl₂ + KCl + H₂O': '2KMnO₄ + 16HCl → 2MnCl₂ + 5Cl₂↑ + 2KCl + 8H₂O',
+            'K2Cr2O7 + HCl = CrCl3 + Cl2 + KCl + H2O': 'K2Cr2O7 + 14HCl → 2CrCl3 + 3Cl2↑ + 2KCl + 7H2O',
+            'Cu + HNO3 = Cu(NO3)2 + NO + H2O': '3Cu + 8HNO3 → 3Cu(NO3)2 + 2NO↑ + 4H2O'
         }
         
         # 标准化输入方程式（去除空格）
@@ -123,6 +128,59 @@ class ChemistrySolver:
                 return result
         
         return None
+    
+    def _matrix_balance_equation(self, equation, reactants, products):
+        """
+        使用矩阵求解法平衡化学方程式
+        
+        Args:
+            equation (str): 原方程式
+            reactants (list): 反应物列表
+            products (list): 生成物列表
+            
+        Returns:
+            str: 平衡后的化学方程式
+        """
+        try:
+            # 获取所有化合物
+            all_compounds = reactants + products
+            
+            # 获取所有元素
+            all_elements = set()
+            compound_compositions = []
+            
+            for compound in all_compounds:
+                formula = compound['formula']
+                # 清理化学式（移除状态符号）
+                clean_formula = self._clean_formula(formula)
+                composition = self._parse_formula(clean_formula)
+                compound_compositions.append(composition)
+                all_elements.update(composition.keys())
+            
+            all_elements = sorted(list(all_elements))
+            
+            # 构建系数矩阵
+            matrix = []
+            for element in all_elements:
+                row = []
+                for i, composition in enumerate(compound_compositions):
+                    count = composition.get(element, 0)
+                    # 反应物为正，生成物为负
+                    if i < len(reactants):
+                        row.append(count)
+                    else:
+                        row.append(-count)
+                matrix.append(row)
+            
+            # 求解矩阵获取系数
+            coefficients = self._solve_matrix(matrix)
+            
+            # 构建平衡后的方程式
+            return self._build_balanced_equation(reactants, products, coefficients)
+            
+        except Exception as e:
+            print(f"矩阵配平失败: {e}")
+            return self._simple_balance_attempt(equation, reactants, products)
     
     def _simple_balance_attempt(self, equation, reactants, products):
         """
@@ -146,6 +204,64 @@ class ChemistrySolver:
         else:
             # 复杂情况，返回原方程式
             return equation
+    
+    def _clean_formula(self, formula):
+        """
+        清理化学式，移除状态符号和其他非化学式字符
+        
+        Args:
+            formula (str): 原始化学式
+            
+        Returns:
+            str: 清理后的化学式
+        """
+        # 首先转换Unicode下标数字
+        clean = self._convert_subscripts(formula)
+        
+        # 移除状态符号（↑, ↓, (g), (l), (s), (aq)等）
+        clean = re.sub(r'[↑↓]', '', clean)
+        clean = re.sub(r'\([gls]\)', '', clean)
+        clean = re.sub(r'\(aq\)', '', clean)
+        clean = clean.strip()
+        return clean
+    
+    def _build_balanced_equation(self, reactants, products, coefficients):
+        """
+        根据系数构建平衡后的化学方程式
+        
+        Args:
+            reactants (list): 反应物列表
+            products (list): 生成物列表
+            coefficients (list): 平衡系数
+            
+        Returns:
+            str: 平衡后的化学方程式
+        """
+        # 构建反应物部分
+        reactant_parts = []
+        for i, reactant in enumerate(reactants):
+            coeff = coefficients[i]
+            formula = reactant['formula']
+            if coeff == 1:
+                reactant_parts.append(formula)
+            else:
+                reactant_parts.append(f"{coeff}{formula}")
+        
+        # 构建生成物部分
+        product_parts = []
+        for i, product in enumerate(products):
+            coeff = coefficients[len(reactants) + i]
+            formula = product['formula']
+            if coeff == 1:
+                product_parts.append(formula)
+            else:
+                product_parts.append(f"{coeff}{formula}")
+        
+        # 组合成完整方程式
+        reactant_str = ' + '.join(reactant_parts)
+        product_str = ' + '.join(product_parts)
+        
+        return f"{reactant_str} → {product_str}"
     
     def extract_formula(self, text):
         """
@@ -249,6 +365,9 @@ class ChemistrySolver:
         Returns:
             dict: 元素及其数量的字典
         """
+        # 首先转换Unicode下标数字为普通数字
+        formula = self._convert_subscripts(formula)
+        
         # 预处理：统一晶水符号
         formula = formula.replace('·', '.').replace('•', '.')
         
@@ -287,6 +406,28 @@ class ChemistrySolver:
             return elements
         else:
             return self._parse_formula_recursive(formula)
+    
+    def _convert_subscripts(self, formula):
+        """
+        将Unicode下标数字转换为普通数字
+        
+        Args:
+            formula (str): 包含下标数字的化学式
+            
+        Returns:
+            str: 转换后的化学式
+        """
+        # Unicode下标数字映射
+        subscript_map = {
+            '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4',
+            '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9'
+        }
+        
+        result = formula
+        for subscript, normal in subscript_map.items():
+            result = result.replace(subscript, normal)
+        
+        return result
     
     def _parse_formula_recursive(self, formula):
         """
@@ -368,7 +509,7 @@ class ChemistrySolver:
             tuple: (反应物列表, 生成物列表)
         """
         # 替换各种等号和箭头为标准等号
-        equation = equation.replace('->', '=').replace('→', '=').replace('⟶', '=')
+        equation = equation.replace('->', '=').replace('→', '=').replace('⟶', '=').replace('＋', '+').replace('＝', '=')
         
         # 分割反应物和生成物
         sides = equation.split('=')
@@ -382,6 +523,8 @@ class ChemistrySolver:
         reactants = []
         for reactant in reactants_str.split('+'):
             reactant = reactant.strip()
+            if not reactant:  # 跳过空字符串
+                continue
             # 提取系数（如果有）
             match = re.match(r'^(\d+)(.+)$', reactant)
             if match:
@@ -397,6 +540,8 @@ class ChemistrySolver:
         products = []
         for product in products_str.split('+'):
             product = product.strip()
+            if not product:  # 跳过空字符串
+                continue
             # 提取系数（如果有）
             match = re.match(r'^(\d+)(.+)$', product)
             if match:
@@ -427,36 +572,60 @@ class ChemistrySolver:
             # 创建符号变量
             vars_list = symbols(f'x0:{n}')
             
+            # 构建系数矩阵
+            coeff_matrix = Matrix(matrix)
+            
+            # 对于齐次线性方程组，寻找非零解
+            # 使用nullspace方法找到零空间的基
+            nullspace = coeff_matrix.nullspace()
+            
+            if nullspace:
+                # 取第一个基向量作为解
+                solution_vector = nullspace[0]
+                
+                # 提取系数值
+                rational_coefficients = []
+                for i in range(n):
+                    coeff = solution_vector[i]
+                    if coeff == 0:
+                        rational_coefficients.append(Rational(1))
+                    else:
+                        rational_coefficients.append(coeff)
+                
+                # 转换为最小正整数解
+                return self._rationalize_coefficients(rational_coefficients)
+            
+            # 如果nullspace为空，尝试传统方法
             # 构建增广矩阵（右侧为0）
             augmented_matrix = [row + [0] for row in matrix]
             
             # 求解线性方程组
             solution = solve_linear_system(Matrix(augmented_matrix), *vars_list)
             
-            # 如果没有解，使用基本的高斯消元法
-            if not solution:
-                return self._fallback_solution(n)
-            
-            # 提取系数值（保持为有理数）
-            rational_coefficients = []
-            for i in range(n):
-                if vars_list[i] in solution:
-                    value = solution[vars_list[i]]
-                    if value is None:
-                        rational_coefficients.append(Rational(1))
-                    else:
-                        try:
-                            # 尝试转换为有理数
-                            rational_coefficients.append(Rational(str(value)))
-                        except (ValueError, TypeError):
-                            # 如果转换失败，使用默认值
+            if solution:
+                # 提取系数值（保持为有理数）
+                rational_coefficients = []
+                for i in range(n):
+                    if vars_list[i] in solution:
+                        value = solution[vars_list[i]]
+                        if value is None:
                             rational_coefficients.append(Rational(1))
-                else:
-                    # 如果变量不在解中，设置为1
-                    rational_coefficients.append(Rational(1))
+                        else:
+                            try:
+                                # 尝试转换为有理数
+                                rational_coefficients.append(Rational(str(value)))
+                            except (ValueError, TypeError):
+                                # 如果转换失败，使用默认值
+                                rational_coefficients.append(Rational(1))
+                    else:
+                        # 如果变量不在解中，设置为1
+                        rational_coefficients.append(Rational(1))
+                
+                # 转换为最小正整数解
+                return self._rationalize_coefficients(rational_coefficients)
             
-            # 转换为最小正整数解
-            return self._rationalize_coefficients(rational_coefficients)
+            # 如果都失败，使用备用方案
+            return self._fallback_solution(n)
             
         except Exception as e:
             # 如果求解失败，返回基本解

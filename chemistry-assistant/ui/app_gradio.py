@@ -10,15 +10,18 @@ import json
 import ast
 import re
 import time
+import socket
 from datetime import datetime
+from pyngrok import ngrok
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import MODEL_CONFIG, UI_CONFIG
 from utils.output_cleaner import output_cleaner
-from utils.web_ui_formatter import clean_and_format_output, format_comparison_output, format_chain_result, format_error_message, format_status_message
+from utils.unified_markdown_renderer import render_content, render_comparison_output, render_chain_result, render_error_message, render_status_message
 from utils.logger import get_logger
+from ui.performance_monitor import get_performance_monitor
 
 logger = get_logger(__name__)
 
@@ -91,13 +94,68 @@ class ConversationManager:
 
     @staticmethod
     def search_history(keyword):
-        """搜索历史记录"""
+        """搜索历史记录（增强版模糊匹配）"""
         history = ConversationManager.load_history()
         results = []
+        keyword = keyword.lower().strip()
+        
         for item in history:
-            if keyword.lower() in item['question'].lower() or keyword.lower() in item['answer'].lower():
+            # 多维度搜索：问题、答案、功能类型
+            question_match = keyword in item['question'].lower()
+            answer_match = keyword in item['answer'].lower()
+            function_type_match = keyword in item.get('function_type', '').lower()
+            
+            # 支持部分词匹配
+            question_words = item['question'].lower().split()
+            keyword_words = keyword.split()
+            word_match = any(any(kw in word for word in question_words) for kw in keyword_words)
+            
+            if question_match or answer_match or function_type_match or word_match:
                 results.append(item)
+        
+        # 按时间排序，最新的在前
+        results.sort(key=lambda x: x['timestamp'], reverse=True)
         return results
+
+    @staticmethod
+    def format_history_for_display(history, show_function_type=True, max_length=35):
+        """格式化历史记录用于显示（优化版）"""
+        formatted = []
+        for i, item in enumerate(reversed(history)):  # 最新的在前面
+            time_str = datetime.fromisoformat(item['timestamp']).strftime('%m-%d %H:%M')
+            
+            # 智能截断问题文本
+            question = item['question']
+            if len(question) > max_length:
+                # 尝试在单词边界截断
+                truncated = question[:max_length]
+                last_space = truncated.rfind(' ')
+                if last_space > max_length * 0.7:  # 如果空格位置合理
+                    question = truncated[:last_space] + '...'
+                else:
+                    question = truncated + '...'
+            
+            # 添加功能类型标识（更丰富的图标）
+            function_icons = {
+                "智能问答": "💬",
+                "化学计算": "🧮", 
+                "综合检索": "🔍",
+                "信息检索": "📚",
+                "LangChain处理": "🔗"
+            }
+            function_icon = function_icons.get(item.get('function_type', ''), "❓")
+            
+            # 添加图片和长度标识
+            image_icon = "🖼️" if item.get('image_path') else ""
+            length_indicator = "📝" if len(item.get('answer', '')) > 500 else ""
+            
+            if show_function_type:
+                display_text = f"{function_icon}{image_icon}{length_indicator} [{time_str}] {question}"
+            else:
+                display_text = f"[{time_str}] {question}"
+                
+            formatted.append(display_text)
+        return formatted
 
     @staticmethod
     def get_conversation_by_id(conversation_id):
@@ -158,29 +216,26 @@ def update_loading_status(status):
     """更新加载状态"""
     return f"<div style='text-align: center; color: #666;'>{status}</div>"
 
-# clean_and_format_output函数已移至utils/web_ui_formatter.py模块
-# 现在直接使用导入的函数
-
 def start_ui(controller=None):
     """
     启动Gradio Web界面
     """
     
-    def process_question(question, function_choice, image=None, 
+    async def process_question(question, function_choice, image=None, 
                         enable_local_rag=True, enable_metaso=True, enable_tongyi=True, enable_pubchem=True,
-                        adaptive_enabled=False, show_complexity=True, show_strategy=True, progress=gr.Progress()):
+                        use_llm_summary=True, adaptive_enabled=False, show_complexity=True, show_strategy=True, progress=gr.Progress()):
         """处理用户问题，带加载状态"""
         progress(0, desc="开始处理...")
         time.sleep(0.5)  # 给进度条显示时间
-    
+
         if not question.strip() and image is None:
             progress(1, desc="处理完成")
             return "请输入问题或上传图片", "", "", ""
-    
+
         if controller is None:
             progress(1, desc="处理完成")
             return "演示模式，请通过 main.py 启动完整系统。", "", "", ""
-    
+
         # 构建任务信息
         task_info = {
             'function': function_choice,
@@ -189,95 +244,75 @@ def start_ui(controller=None):
             'enable_tongyi': enable_tongyi,
             'enable_pubchem': enable_pubchem
         }
-    
+
         if image is not None:
             task_info["image"] = image
             if not question.strip():
                 question = "请分析这张图片中的化学内容，包括化学方程式、分子结构、实验装置等。"
-    
+
         try:
             progress(0.3, desc="正在处理问题...")
             
-            # 综合检索处理
             if function_choice == "综合检索":
-                progress(0.4, desc="正在进行综合检索...")
-                
-                # 调用综合检索方法
-                result = controller.process_comprehensive_retrieval(
-                    question, 
+                progress(0.4, desc="使用增强综合检索处理...")
+                # 调用新的异步综合检索功能
+                start_time = time.time()
+                result = await controller.process_comprehensive_retrieval(
+                    query=question,
                     enable_local_rag=enable_local_rag,
-                    enable_metaso=enable_metaso, 
+                    enable_metaso=enable_metaso,
                     enable_tongyi=enable_tongyi,
-                    enable_pubchem=enable_pubchem
+                    enable_pubchem=enable_pubchem,
+                    use_llm_summary=use_llm_summary
                 )
+                total_time = time.time() - start_time
                 
                 if result.get('success'):
-                    answer = result.get('combined_answer', '未获取到结果')
+                    # 记录性能数据
+                    monitor = get_performance_monitor()
+                    successful_sources = [s['name'] for s in result.get('sources', []) if s.get('confidence', 0) > 0.1]
+                    source_times = {s['name']: s.get('retrieval_time', 0.0) for s in result.get('sources', [])}
                     
-                    # 构建知识源信息
-                    sources_info = []
-                    sources = result.get('sources', [])
+                    monitor.record_performance(
+                        query=question,
+                        total_time=total_time,
+                        confidence_score=result.get('confidence_score', 0.0),
+                        sources_count=len(result.get('sources', [])),
+                        successful_sources=successful_sources,
+                        strategy_used="综合检索" + (" + LLM总结" if use_llm_summary else ""),
+                        source_times=source_times
+                    )
                     
-                    if sources:
-                        sources_info.append(f"**📚 使用的知识源**: {', '.join(sources)}")
+                    answer = result.get('combined_answer', '未获取到回答')
+                    # 构建详细的来源信息
+                    sources_info = ""
+                    if result.get('sources'):
+                        sources_info = "\n\n### 📚 知识来源信息\n"
+                        for i, source in enumerate(result['sources'], 1):
+                            confidence_bar = "🟢" if source['confidence'] > 0.7 else "🟡" if source['confidence'] > 0.4 else "🔴"
+                            sources_info += f"**{i}. {source['name']}** {confidence_bar}\n"
+                            sources_info += f"- 置信度: {source['confidence']:.2f}\n"
+                            sources_info += f"- 检索时间: {source['retrieval_time']:.2f}秒\n"
+                            if source['content']:
+                                sources_info += f"- 内容摘要: {source['content']}\n\n"
                     
-                    if 'local_documents' in result and result['local_documents']:
-                        sources_info.append(f"**📄 本地文档数**: {len(result['local_documents'])}")
+                    # 添加性能统计信息
+                    performance_info = f"\n\n### ⚡ 性能统计\n"
+                    performance_info += f"- 总耗时: {total_time:.2f}秒\n"
+                    performance_info += f"- 整体置信度: {result.get('confidence_score', 0):.2f}\n"
+                    performance_info += f"- 检索策略: {result.get('strategy', '未知')}\n"
                     
-                    if 'external_knowledge' in result:
-                        ext_knowledge = result['external_knowledge']
-                        if ext_knowledge.get('all_sources'):
-                            successful_sources = [s['source'] for s in ext_knowledge['all_sources'] if s.get('success')]
-                            if successful_sources:
-                                sources_info.append(f"**🌐 外部知识源**: {', '.join(successful_sources)}")
-                    
-                    comp = "\n\n".join(sources_info) if sources_info else ""
-                    chain = ""
+                    answer = answer + sources_info + performance_info
+                    comp = "综合检索模式：已整合多个知识源的信息"
                 else:
-                    answer = result.get('error', '综合检索处理失败')
-                    comp = "检索失败，请检查网络连接和API配置"
-                    chain = ""
-            
-            # 自适应检索处理
-            elif adaptive_enabled:
-                progress(0.4, desc="正在进行自适应检索...")
-                import asyncio
-                result = asyncio.run(controller.process_with_adaptive_retrieval(question))
+                    answer = f"综合检索失败: {result.get('error', '未知错误')}"
+                    comp = "检索过程中发生错误"
                 
-                if result.get('success'):
-                    answer = result['answer']
-                    comp = ""
-                    chain = ""
-                    
-                    # 构建自适应检索信息
-                    adaptive_info = []
-                    retrieval_info = result.get('retrieval_info', {})
-                    
-                    if show_strategy and retrieval_info:
-                        strategy_used = retrieval_info.get('strategy_used', 'unknown')
-                        adaptive_info.append(f"**🎯 使用策略**: {strategy_used}")
-                        
-                        if 'execution_time' in retrieval_info:
-                            adaptive_info.append(f"**⏱️ 执行时间**: {retrieval_info['execution_time']:.2f}秒")
-                        
-                        if 'documents_retrieved' in retrieval_info:
-                            adaptive_info.append(f"**📄 检索文档数**: {retrieval_info['documents_retrieved']}")
-                    
-                    if show_complexity and retrieval_info.get('complexity_analysis'):
-                        analysis = retrieval_info['complexity_analysis']
-                        adaptive_info.append(f"**🧠 查询复杂度**: {analysis.get('complexity', 'unknown')} (分数: {analysis.get('score', 0):.2f})")
-                        adaptive_info.append(f"**💭 分析原因**: {analysis.get('reasoning', '无')}")
-                    
-                    if adaptive_info:
-                        chain = "\n\n---\n\n### 🔍 自适应检索信息\n\n" + "\n\n".join(adaptive_info)
-                else:
-                    answer = result.get('answer', '自适应检索处理失败')
-                    comp = f"错误信息: {result.get('error', '未知错误')}"
-                    chain = ""
-                    
+                chain = ""
             elif function_choice == "LangChain处理":
+                progress(0.4, desc="使用LangChain处理...")
                 response, comparison, chain_result = controller.process_with_chain(
-                    question,
+                    question, 
                     function_type="智能问答",
                     image_data=image
                 )
@@ -289,204 +324,287 @@ def start_ui(controller=None):
                 answer = response
                 comp = comparison
                 chain = ""
-
+        
             progress(0.7, desc="正在格式化结果...")
-            # 使用专门的格式化函数处理不同类型的输出
-            cleaned_answer = clean_and_format_output(answer)
-            cleaned_comparison = format_comparison_output(comp)
-            cleaned_chain_result = format_chain_result(chain)
+            # 使用统一渲染器处理不同类型的输出
+            cleaned_answer = render_content(answer)
+            cleaned_comparison = render_comparison_output(comp)
+            cleaned_chain_result = render_chain_result(chain)
             
-            # 构建检索状态信息
-            adaptive_status = ""
-            if function_choice == "综合检索":
-                status_parts = []
-                if enable_local_rag:
-                    status_parts.append("本地RAG")
-                if enable_metaso:
-                    status_parts.append("Metaso")
-                if enable_tongyi:
-                    status_parts.append("通义千问")
-                if enable_pubchem:
-                    status_parts.append("PubChem")
-                
-                if status_parts:
-                    adaptive_status = f"✅ 综合检索已启用: {', '.join(status_parts)}"
-                else:
-                    adaptive_status = "⚠️ 未启用任何知识源"
-            elif adaptive_enabled:
-                if hasattr(controller, 'enable_adaptive') and controller.enable_adaptive:
-                    adaptive_status = "✅ 自适应检索已启用"
-                else:
-                    adaptive_status = "⚠️ 自适应检索功能未在系统中启用，使用传统处理模式"
-
-            # 保存对话历史
-            ConversationManager.add_conversation(question, cleaned_answer, function_choice, bool(image))
-
+            # 构建自适应状态信息
+            if adaptive_enabled and hasattr(controller, 'get_last_retrieval_info'):
+                progress(0.9, desc="准备状态信息...")
+                try:
+                    retrieval_info = controller.get_last_retrieval_info()
+                    if retrieval_info:
+                        status_details = f"""检索策略: {retrieval_info.get('strategy_used', '标准检索')}
+响应时间: {retrieval_info.get('response_time', 0):.2f}秒"""
+                        if show_complexity and retrieval_info.get('complexity_analysis'):
+                            complexity = retrieval_info['complexity_analysis']
+                            status_details += f"""
+复杂度: {complexity.get('complexity', '未知')} (分数: {complexity.get('score', 0):.2f})"""
+                        adaptive_status = render_status_message("处理完成", status_details)
+                    else:
+                        adaptive_status = render_status_message("处理完成", "使用标准处理流程")
+                except Exception as status_error:
+                    logger.warning(f"获取状态信息失败: {status_error}")
+                    adaptive_status = render_status_message("处理完成")
+            else:
+                adaptive_status = render_status_message("处理完成")
+            
             progress(1, desc="处理完成")
+            
+            # 保存对话历史
+            try:
+                ConversationManager.add_conversation(
+                    question=question,
+                    answer=cleaned_answer,
+                    function_type=function_choice,
+                    image_path=bool(image)
+                )
+            except Exception as save_error:
+                logger.warning(f"保存对话历史失败: {save_error}")
+
             return cleaned_answer, cleaned_comparison, cleaned_chain_result, adaptive_status
+                
         except Exception as e:
-            logger.error(f"处理问题时发生错误: {e}", exc_info=True)
-            progress(1, desc="处理失败")
-            return f"处理过程中发生错误: {e}", "", "", "❌ 处理失败"
+            logger.error(f"处理问题时出错: {str(e)}")
+            error_msg = render_error_message(e, "问题处理")
+            adaptive_status = render_status_message("处理失败", str(e))
+            progress(1, desc="处理完成")
+            return error_msg, "", "", adaptive_status
 
     def on_clear_conversation():
-        if not question.strip() and image is None:
-            return "请输入问题或上传图片", "", ""
-        
-        if controller is None:
-            # ... (省略了演示模式的代码，因为它不涉及核心逻辑)
-            return "演示模式，请通过 main.py 启动完整系统。", "", ""
-        
-        # 构建任务信息
-        task_info = {
-            'function': function_choice
-        }
-        
-        if image is not None:
-            task_info["image"] = image
-            if not question.strip():
-                question = "请分析这张图片中的化学内容，包括化学方程式、分子结构、实验装置等。"
-        
+        """清空当前对话"""
         try:
-            if function_choice == "LangChain处理":
-                response, comparison, chain_result = controller.process_with_chain(
-                    question, 
-                    function_type="智能问答",
-                    image_data=image
-                )
-                answer = response
-                comp = comparison
-                chain = chain_result
-            else:
-                response, comparison = controller.process_query(question, task_info)
-                answer = response
-                comp = comparison
-                chain = ""
-
-            # 使用专门的格式化函数处理不同类型的输出
-            cleaned_answer = clean_and_format_output(answer)
-            cleaned_comparison = format_comparison_output(comp)
-            cleaned_chain_result = format_chain_result(chain)
-
-            return cleaned_answer, cleaned_comparison, cleaned_chain_result
-                
+            # 使用统一渲染器显示清空状态
+            clear_msg = render_status_message("对话已清空", "可以开始新的对话")
+            return clear_msg, "", ""
         except Exception as e:
-            error_msg = format_error_message(e, "问题处理")
+            logger.error(f"清空对话时出错: {str(e)}")
+            error_msg = render_error_message(e, "清空对话")
             return error_msg, "", ""
     
     # 创建Gradio界面
     with gr.Blocks(
         title="🧪 化学助手", 
         theme=gr.themes.Soft(),
-        head="""
-        <style>
-        /* 表格样式优化 - 解决方程式显示问题 */
-        .markdown-body table {
-            width: 100%;
-            table-layout: auto;
-            border-collapse: collapse;
-            margin: 1em 0;
-            overflow-x: auto;
+         head="""
+         <style>
+         :root {
+          --bg: #0f1419; /* 更深的背景色，类似ChatGPT dark mode */
+          --panel: #1a1a1a; /* 面板背景 */
+          --text: #e3e3e3; /* 主要文本颜色 */
+          --subtle: #b3b3b3; /* 次级文本 */
+          --primary: #19c37d; /* ChatGPT绿色主色调 */
+          --accent: #ff6b4a; /* 强调色橙红 */
+          --card: #212121; /* 卡片背景 */
+          --border: #343541; /* 边框颜色 */
+          --hover: #2a2a2f; /* 悬停颜色 */
+          --input-bg: #40414f; /* 输入框背景 */
         }
         
-        .markdown-body table td, .markdown-body table th {
-            border: 1px solid #ddd;
-            padding: 8px 12px;
-            text-align: left;
-            vertical-align: top;
-            word-wrap: break-word;
-            white-space: normal;
-            min-width: 0;
+        html, body { 
+          font-family: 'Söhne', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+          color: var(--text); 
+          background: var(--bg);
+          font-size: 14px;
+          line-height: 1.6;
         }
         
-        /* 化学方程式样式 */
-        .chemical-equation {
-            white-space: nowrap;
-            display: inline-block;
-            font-family: 'Courier New', monospace;
-            background-color: #f8f9fa;
-            padding: 2px 6px;
-            border-radius: 3px;
-            border: 1px solid #e9ecef;
-            font-size: 0.95em;
-            overflow-x: auto;
-            max-width: 100%;
+        .gradio-container { 
+          max-width: 1200px !important; 
+          margin: 0 auto; 
+          padding: 16px;
         }
         
-        /* 特别处理方程式列 - 确保化学方程式在一行显示 */
-        .markdown-body table td:nth-child(2) {
-            white-space: nowrap;
-            overflow-x: auto;
-            max-width: 400px;
-            font-family: 'Times New Roman', serif;
+        /* 内容区域 */
+        .gradio-container .prose, .markdown-body { 
+          color: var(--text); 
+          line-height: 1.7; 
+          font-size: 14px; 
+          max-width: none;
         }
         
-        /* 确保化学方程式在表格中正确显示 */
-        .markdown-body table .chemical-equation {
-            font-family: 'Courier New', monospace;
-            white-space: nowrap;
+        /* 标题样式 */
+        .markdown-body h1, .markdown-body h2, .markdown-body h3 { 
+          color: var(--text); 
+          font-weight: 600; 
+          margin-bottom: 12px; 
+          margin-top: 24px;
         }
         
-        /* 包含化学方程式的表格单元格 */
-        .markdown-body table td:has(.chemical-equation) {
-            overflow-x: auto;
-            white-space: nowrap;
+        .markdown-body h1 { font-size: 24px; }
+        .markdown-body h2 { font-size: 20px; }
+        .markdown-body h3 { font-size: 18px; }
+        
+        /* 段落和文本 */
+        .markdown-body p { 
+          margin: 8px 0; 
+          color: var(--text); 
         }
         
-        /* 表格容器滚动 */
-        .markdown-body {
-            overflow-x: auto;
+        .markdown-body strong { color: var(--text); font-weight: 600; }
+        .markdown-body em { color: var(--subtle); }
+        
+        /* 面板和容器 */
+        .gr-panel, .gr-block { 
+          background: var(--panel) !important; 
+          border: 1px solid var(--border) !important; 
+          border-radius: 8px !important;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important; 
         }
         
-        /* 响应式表格 */
+        .gr-accordion, .gr-box { 
+          background: var(--card) !important; 
+          border: 1px solid var(--border) !important; 
+          border-radius: 6px !important;
+        }
+        
+        /* 输入框样式 */
+        .gradio-container .gr-input textarea, 
+        .gradio-container .gr-input input { 
+          background: var(--input-bg) !important; 
+          border: 1px solid var(--border) !important; 
+          color: var(--text) !important; 
+          border-radius: 6px !important;
+          padding: 12px !important;
+          font-size: 14px !important;
+        }
+        
+        .gradio-container .gr-input textarea:focus, 
+        .gradio-container .gr-input input:focus { 
+          border-color: var(--primary) !important; 
+          box-shadow: 0 0 0 1px var(--primary) !important;
+        }
+        
+        /* 按钮样式 */
+        .gradio-container .gr-button { 
+          background: var(--primary) !important; 
+          color: white !important; 
+          border: none !important; 
+          border-radius: 6px !important;
+          font-weight: 500 !important;
+          font-size: 14px !important;
+          padding: 8px 16px !important;
+          transition: all 0.2s ease !important;
+        }
+        
+        .gradio-container .gr-button:hover { 
+          background: #16a166 !important;
+          transform: translateY(-1px);
+          box-shadow: 0 2px 6px rgba(25, 195, 125, 0.3) !important;
+        }
+        
+        .gradio-container .gr-button.secondary { 
+          background: var(--card) !important; 
+          color: var(--text) !important; 
+          border: 1px solid var(--border) !important; 
+        }
+        
+        .gradio-container .gr-button.secondary:hover { 
+          background: var(--hover) !important; 
+          border-color: var(--primary) !important;
+        }
+        
+        /* 下拉框和选择器 */
+        .gradio-container .gr-dropdown { 
+          background: var(--input-bg) !important;
+          border: 1px solid var(--border) !important;
+          color: var(--text) !important;
+        }
+        
+        .gradio-container .gr-radio-group { 
+          color: var(--text) !important; 
+        }
+        
+        /* 链接 */
+        .gradio-container .gr-prose a { 
+          color: var(--primary); 
+          text-decoration: none; 
+        }
+        
+        .gradio-container .gr-prose a:hover { 
+          text-decoration: underline; 
+        }
+        
+        /* 代码块 */
+        .markdown-body pre, .markdown-body code { 
+          color: var(--text); 
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 4px;
+        }
+        
+        .markdown-body pre { 
+          padding: 16px; 
+          margin: 12px 0;
+        }
+        
+        .markdown-body code { 
+          padding: 2px 6px; 
+          font-size: 13px;
+        }
+        
+        /* 引用块 */
+        .markdown-body blockquote { 
+          border-left: 3px solid var(--primary); 
+          background: var(--card); 
+          padding: 12px 16px; 
+          color: var(--text); 
+          margin: 12px 0;
+        }
+        
+        /* 表格 */
+        .markdown-body table { 
+          border-color: var(--border); 
+          background: var(--card);
+        }
+        
+        .markdown-body table td, .markdown-body table th { 
+          border-color: var(--border); 
+          padding: 8px 12px;
+        }
+        
+        /* Markdown区域优化 */
+        .gr-markdown { 
+          padding: 16px; 
+          border-radius: 8px; 
+          background: var(--card); 
+          border: 1px solid var(--border); 
+          margin: 8px 0;
+        }
+        
+        /* 布局间距优化 */
+        .gr-row { 
+          gap: 12px; 
+          margin: 8px 0;
+        }
+        
+        .gr-column { 
+          padding: 0 8px; 
+        }
+        
+        /* 响应式优化 */
         @media (max-width: 768px) {
-            .markdown-body table {
-                font-size: 0.9em;
-            }
-            .markdown-body table td:nth-child(2) {
-                max-width: 300px;
-            }
-            
-            .chemical-equation {
-                font-size: 0.85em;
-                max-width: 200px;
-            }
-        }
-        
-        /* 表格滚动条样式 */
-        .markdown-body table td:nth-child(2)::-webkit-scrollbar,
-        .chemical-equation::-webkit-scrollbar {
-            height: 4px;
-        }
-        
-        .markdown-body table td:nth-child(2)::-webkit-scrollbar-track,
-        .chemical-equation::-webkit-scrollbar-track {
-            background: #f1f1f1;
-        }
-        
-        .markdown-body table td:nth-child(2)::-webkit-scrollbar-thumb,
-        .chemical-equation::-webkit-scrollbar-thumb {
-            background: #888;
-            border-radius: 2px;
-        }
-        
-        .markdown-body table td:nth-child(2)::-webkit-scrollbar-thumb:hover,
-        .chemical-equation::-webkit-scrollbar-thumb:hover {
-            background: #555;
-        }
-        
-        /* 强制表格内容不换行 */
-        .markdown-body table td:nth-child(2) * {
-            white-space: nowrap !important;
+          .gradio-container { 
+            padding: 8px; 
+          }
+          
+          .gr-column { 
+            padding: 0 4px; 
+          }
+          
+          .gr-row { 
+            gap: 8px; 
+          }
         }
         </style>
-        <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
-        <script id=\"MathJax-script\" async src=\"https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js\"></script>
         <script>
         window.MathJax = {
             tex: {
-                inlineMath: [['$', '$'], ['\\(', '\\)']],
-                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                inlineMath: [["$", "$"], ['\\(', '\\)']],
+                displayMath: [["$$", "$$"], ['\\[', '\\]']],
                 processEscapes: true,
                 processEnvironments: true,
                 packages: {'[+]': ['mhchem']}
@@ -498,7 +616,6 @@ def start_ui(controller=None):
                 skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
             }
         };
-        
         function renderMathJax() {
             if (window.MathJax && window.MathJax.typesetPromise) {
                 window.MathJax.typesetPromise().catch(function (err) {
@@ -506,29 +623,20 @@ def start_ui(controller=None):
                 });
             }
         }
-        
         const observer = new MutationObserver(function(mutations) {
             let shouldRender = false;
             mutations.forEach(function(mutation) {
                 if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                    for (let node of mutation.addedNodes) {
-                        if (node.nodeType === 1 && (node.textContent.includes('$') || node.textContent.includes('\\('))) {
-                            shouldRender = true;
-                            break;
-                        }
-                    }
+                    shouldRender = true;
                 }
             });
             if (shouldRender) {
-                setTimeout(renderMathJax, 100);
+                setTimeout(renderMathJax, 120);
             }
         });
-        
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
+        observer.observe(document.body, { childList: true, subtree: true });
         </script>
+        <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
         """
     ) as demo:
         gr.Markdown("# 🧪 化学助手")
@@ -566,6 +674,11 @@ def start_ui(controller=None):
                         value=True,
                         info="检索化学化合物信息"
                     )
+                    use_llm_summary = gr.Checkbox(
+                        label="启用LLM智能总结",
+                        value=True,
+                        info="使用大模型对检索结果进行智能总结和整合"
+                    )
                 
                 # 自适应检索相关设置
                 with gr.Accordion("🔧 自适应检索设置", open=False, visible=True) as adaptive_settings:
@@ -600,6 +713,19 @@ def start_ui(controller=None):
                 with gr.Row():
                     analyze_complexity_btn = gr.Button("🧠 分析查询复杂度", variant="secondary", size="sm")
                     get_performance_btn = gr.Button("📊 获取性能报告", variant="secondary", size="sm")
+                    
+                # 综合检索性能监控
+                with gr.Accordion("📈 综合检索性能监控", open=False):
+                    with gr.Row():
+                        perf_report_btn = gr.Button("📊 生成性能报告", variant="secondary", size="sm")
+                        perf_clear_btn = gr.Button("🗑️ 清空性能数据", variant="secondary", size="sm")
+                        perf_export_btn = gr.Button("💾 导出性能数据", variant="secondary", size="sm")
+                    
+                    perf_output = gr.Markdown(label="性能报告", value="暂无性能数据")
+                    
+                    with gr.Row():
+                        perf_summary = gr.JSON(label="性能摘要", value={})
+                        perf_trends = gr.JSON(label="性能趋势", value={})
                 
                 # 复杂度分析和性能报告显示区域
                 with gr.Accordion("🔍 自适应检索详细信息", open=False):
@@ -609,21 +735,30 @@ def start_ui(controller=None):
         with gr.Column(scale=1):
             gr.Markdown("### 📚 历史对话管理")
             
-            # 搜索功能
+            # 搜索功能（增强版）
             with gr.Row():
                 search_input = gr.Textbox(
-                    placeholder="搜索历史对话...",
-                    label="搜索",
-                    scale=3
+                    placeholder="🔍 搜索历史对话（支持问题、答案、功能类型）...",
+                    label="智能搜索",
+                    scale=3,
+                    lines=1
                 )
-                search_btn = gr.Button("🔍", scale=1, size="sm")
+                search_btn = gr.Button("🔍", scale=1, size="sm", variant="primary")
+            
+            # 功能类型筛选器
+            with gr.Row():
+                type_filter = gr.Radio(
+                    choices=["全部", "智能问答", "化学计算", "综合检索", "LangChain处理"],
+                    value="全部",
+                    label="按类型筛选",
+                    interactive=True
+                )
             
             # 历史记录列表
             history_list = gr.Dropdown(
                 choices=ConversationManager.format_history_for_display(ConversationManager.load_history()),
                 label="历史对话列表",
-                interactive=True,
-                max_choices=50
+                interactive=True
             )
             
             # 操作按钮
@@ -652,12 +787,10 @@ def start_ui(controller=None):
                     lines=4
                 )
             
-            # 状态显示
-            history_status = gr.Textbox(
-                label="操作状态", 
-                interactive=False, 
-                visible=True,
-                lines=2
+            # 状态显示（从Textbox改为Markdown以更友好地显示提示）
+            history_status = gr.Markdown(
+                value="",
+                label="操作状态"
             )
         
         # 历史对话相关事件处理函数
@@ -705,6 +838,9 @@ def start_ui(controller=None):
                         # 格式化显示内容
                         full_time = datetime.fromisoformat(item['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
                         
+                        # 获取原始答案内容，避免再次格式化
+                        raw_answer = item['answer']
+                        
                         # 构建完整的历史记录显示
                         history_content = f"""## 📝 历史对话详情
 
@@ -722,7 +858,7 @@ def start_ui(controller=None):
 ---
 
 ### 🤖 AI回答:
-{item['answer']}
+{raw_answer}
 
 ---
 
@@ -757,19 +893,40 @@ def start_ui(controller=None):
                 return update_history_list(), update_stats(), f"❌ 删除失败: {str(e)}"
 
         def search_history_conversations(keyword):
-            """搜索历史对话"""
+            """搜索历史对话（增强版）"""
             if not keyword.strip():
                 # 如果搜索关键词为空，显示所有历史记录
                 all_history = ConversationManager.load_history()
                 choices = ConversationManager.format_history_for_display(all_history)
-                return choices, f"显示所有 {len(all_history)} 条记录"
+                return choices, f"📋 显示所有 {len(all_history)} 条记录"
             
             try:
                 results = ConversationManager.search_history(keyword.strip())
                 choices = ConversationManager.format_history_for_display(results)
-                return choices, f"🔍 找到 {len(results)} 条匹配记录"
+                
+                if len(results) == 0:
+                    return choices, f"🔍 未找到包含 '{keyword}' 的记录，尝试其他关键词"
+                else:
+                    return choices, f"🔍 找到 {len(results)} 条匹配记录（关键词：{keyword}）"
+                    
             except Exception as e:
+                logger.error(f"搜索历史记录失败: {e}")
                 return [], f"❌ 搜索失败: {str(e)}"
+
+        def filter_history_by_type(function_type):
+            """按功能类型筛选历史记录"""
+            try:
+                all_history = ConversationManager.load_history()
+                if function_type == "全部":
+                    filtered_history = all_history
+                else:
+                    filtered_history = [item for item in all_history if item.get('function_type') == function_type]
+                
+                choices = ConversationManager.format_history_for_display(filtered_history)
+                return choices, f"🏷️ {function_type}类型记录：{len(filtered_history)} 条"
+            except Exception as e:
+                logger.error(f"筛选历史记录失败: {e}")
+                return [], f"❌ 筛选失败: {str(e)}"
 
         def clear_all_history():
             """清除所有历史记录"""
@@ -806,6 +963,59 @@ def start_ui(controller=None):
             except Exception as e:
                 return update_history_list(), update_stats(), f"❌ 刷新失败: {str(e)}"
 
+        # 综合检索性能监控函数
+        def generate_comprehensive_performance_report():
+            """生成综合检索性能报告"""
+            try:
+                monitor = get_performance_monitor()
+                report = monitor.generate_performance_report()
+                return report
+            except Exception as e:
+                logger.error(f"生成综合检索性能报告失败: {e}")
+                return f"生成性能报告失败: {str(e)}"
+        
+        def get_comprehensive_performance_summary():
+            """获取综合检索性能摘要"""
+            try:
+                monitor = get_performance_monitor()
+                summary = monitor.get_performance_summary()
+                return summary
+            except Exception as e:
+                logger.error(f"获取性能摘要失败: {e}")
+                return {"error": str(e)}
+        
+        def get_comprehensive_performance_trends():
+            """获取综合检索性能趋势"""
+            try:
+                monitor = get_performance_monitor()
+                trends = monitor.get_performance_trends()
+                return trends
+            except Exception as e:
+                logger.error(f"获取性能趋势失败: {e}")
+                return {"error": str(e)}
+        
+        def clear_comprehensive_performance_data():
+            """清空综合检索性能数据"""
+            try:
+                monitor = get_performance_monitor()
+                monitor.clear_records()
+                return "性能数据已清空", {}, {}
+            except Exception as e:
+                logger.error(f"清空性能数据失败: {e}")
+                return f"清空失败: {str(e)}", {}, {}
+        
+        def export_comprehensive_performance_data():
+            """导出综合检索性能数据"""
+            try:
+                monitor = get_performance_monitor()
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filepath = f"performance_data_{timestamp}.json"
+                monitor.export_data(filepath)
+                return f"性能数据已导出到: {filepath}"
+            except Exception as e:
+                logger.error(f"导出性能数据失败: {e}")
+                return f"导出失败: {str(e)}"
+
         # 绑定历史记录相关事件
         load_history_btn.click(
             fn=load_selected_history,
@@ -838,6 +1048,13 @@ def start_ui(controller=None):
             outputs=[history_list, history_status]
         )
 
+        # 新增：功能类型筛选事件
+        type_filter.change(
+            fn=filter_history_by_type,
+            inputs=[type_filter],
+            outputs=[history_list, history_status]
+        )
+        
         refresh_history_btn.click(
             fn=refresh_history_and_stats,
             inputs=[],
@@ -936,14 +1153,14 @@ def start_ui(controller=None):
                 return f"获取报告过程中发生错误: {str(e)}"
         
         # 主要功能事件绑定
-        def submit_and_refresh(question, function_choice, image, 
-                              enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem,
+        async def submit_and_refresh(question, function_choice, image, 
+                              enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem, use_llm_summary,
                               adaptive_enabled, show_complexity, show_strategy):
             """提交问题并刷新历史记录"""
             # 处理问题
-            answer, comparison, chain_result, adaptive_status = process_question(
+            answer, comparison, chain_result, adaptive_status = await process_question(
                 question, function_choice, image, 
-                enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem,
+                enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem, use_llm_summary,
                 adaptive_enabled, show_complexity, show_strategy
             )
             
@@ -955,18 +1172,20 @@ def start_ui(controller=None):
 
         submit_btn.click(
             fn=submit_and_refresh,
-            inputs=[question_input, function_choice, image_input, 
-                   enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem,
-                   adaptive_enabled, show_complexity_analysis, show_strategy_info],
-            outputs=[answer_output, comparison_output, chain_result_output, adaptive_status_output, history_list, stats_display]
+            inputs=[question_input, function_choice, image_input,
+                    enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem, use_llm_summary,
+                    adaptive_enabled, show_complexity_analysis, show_strategy_info],
+            outputs=[answer_output, comparison_output, chain_result_output, adaptive_status_output, history_list, stats_display],
+            show_progress=True
         )
         
         question_input.submit(
             fn=submit_and_refresh,
-            inputs=[question_input, function_choice, image_input, 
-                   enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem,
-                   adaptive_enabled, show_complexity_analysis, show_strategy_info],
-            outputs=[answer_output, comparison_output, chain_result_output, adaptive_status_output, history_list, stats_display]
+            inputs=[question_input, function_choice, image_input,
+                    enable_local_rag, enable_metaso, enable_tongyi, enable_pubchem, use_llm_summary,
+                    adaptive_enabled, show_complexity_analysis, show_strategy_info],
+            outputs=[answer_output, comparison_output, chain_result_output, adaptive_status_output, history_list, stats_display],
+            show_progress=True
         )
         
         # 自适应检索工具按钮事件
@@ -1001,6 +1220,30 @@ def start_ui(controller=None):
         more_chem_btns[1].click(lambda: "化学计量：2mol H2与O2反应产生多少mol H2O", outputs=question_input)
         more_chem_btns[2].click(lambda: "计算0.1M NaOH溶液的pH值", outputs=question_input)
         more_chem_btns[3].click(lambda: "波义耳定律：压强从1atm变为2atm时体积变化", outputs=question_input)
+        
+        # 综合检索性能监控事件绑定
+        perf_report_btn.click(
+            fn=generate_comprehensive_performance_report,
+            outputs=[perf_output]
+        )
+        
+        perf_clear_btn.click(
+            fn=clear_comprehensive_performance_data,
+            outputs=[perf_output, perf_summary, perf_trends]
+        )
+        
+        perf_export_btn.click(
+            fn=export_comprehensive_performance_data,
+            outputs=[perf_output]
+        )
+        
+        # 定期更新性能摘要和趋势
+        def update_performance_displays():
+            summary = get_comprehensive_performance_summary()
+            trends = get_comprehensive_performance_trends()
+            return summary, trends
+        
+        # 可以添加定时器或其他触发器来更新性能显示
     
     # 动态端口分配，避免端口冲突
     import socket
@@ -1024,14 +1267,37 @@ def start_ui(controller=None):
     else:
         print(f"🌐 使用端口: {available_port}")
     
+    # 配置Ngrok
+    try:
+        # 设置Ngrok认证token
+        ngrok.set_auth_token("30wI9yvO37ZIJZLmGMFO1RcuHjm_3axwVACtnAwToAeUFirKF")
+        print("✅ Ngrok认证token已设置")
+        
+        # 创建Ngrok隧道
+        public_url = ngrok.connect(available_port)
+        print(f"🌍 公网访问地址: {public_url}")
+        print(f"📱 您可以通过以下链接在任何设备上访问应用: {public_url}")
+        
+    except Exception as e:
+        print(f"⚠️ Ngrok配置失败: {e}")
+        print("将使用本地模式启动")
+        public_url = None
+    
     demo.launch(
         server_name="127.0.0.1",
         server_port=available_port,
-        share=False,
+        share=True,  # 启用Gradio内置分享功能作为备选
         inbrowser=True,
         show_error=True,
         quiet=False
     )
+    
+    # 清理Ngrok隧道
+    try:
+        ngrok.disconnect(public_url)
+        print("🔌 Ngrok隧道已断开")
+    except:
+        pass
     
     return demo
 

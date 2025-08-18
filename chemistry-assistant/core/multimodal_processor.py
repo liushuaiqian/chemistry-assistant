@@ -32,7 +32,7 @@ class MultimodalProcessor:
         self.llm_manager = LLMManager()
         
         # 加载配置（保留用于视觉API调用）
-        self.tongyi_vision_config = MODEL_CONFIG.get('tongyi_vision', {})
+        self.zhipu_vision_config = MODEL_CONFIG.get('zhipu_vision', {})
         self.tongyi_config = MODEL_CONFIG.get('tongyi', {})
         self.deepseek_config = MODEL_CONFIG.get('deepseek', {})
         self.glm4_plus_config = MODEL_CONFIG.get('zhipu', {})  # GLM-4-Plus通过智谱API调用
@@ -45,9 +45,9 @@ class MultimodalProcessor:
         验证配置的有效性
         """
         try:
-            # 检查通义视觉配置
-            if not self.tongyi_vision_config.get('api_key'):
-                self.logger.warning("通义视觉API密钥未配置")
+            # 检查智谱视觉配置
+            if not self.zhipu_vision_config.get('api_key'):
+                self.logger.warning("智谱视觉API密钥未配置")
             
             # 检查通义千问配置
             if not self.tongyi_config.get('api_key'):
@@ -170,7 +170,7 @@ class MultimodalProcessor:
     
     def _extract_text_from_image(self, image_data: Union[str, bytes], image_format: str = 'jpeg') -> str:
         """
-        使用通义视觉模型从图像中提取题干
+        使用智谱视觉模型从图像中提取题干
         
         Args:
             image_data: 图像数据
@@ -185,64 +185,11 @@ class MultimodalProcessor:
             else:
                 image_base64 = image_data
             
-            # 构建请求
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.tongyi_vision_config['api_key']}"
-            }
+            # 使用LLM管理器调用智谱视觉模型
+            question = "请仔细分析这张图片中的化学题目，提取完整的题干内容。如果图片中包含化学方程式、分子式或其他化学符号，请准确识别并转录，并使用MathJax格式表示化学公式，例如：$H_2SO_4$、$$2H_2 + O_2 \\rightarrow 2H_2O$$。"
+            result = self.llm_manager.call_zhipu_vision(question, image_data)
             
-            data = {
-                "model": self.tongyi_vision_config['model'],
-                "input": {
-                    "messages": [
-                        {
-                            "role": "system", 
-                            "content": [{"text": "你是一个专业的化学助手，擅长识别和分析化学题目。请在识别化学公式时使用MathJax格式，例如：$H_2SO_4$、$CaCO_3$等。"}]
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {"image": f"data:image/{image_format};base64,{image_base64}"},
-                                {"text": "请仔细分析这张图片中的化学题目，提取完整的题干内容。如果图片中包含化学方程式、分子式或其他化学符号，请准确识别并转录，并使用MathJax格式表示化学公式，例如：$H_2SO_4$、$$2H_2 + O_2 \\rightarrow 2H_2O$$。"}
-                            ]
-                        }
-                    ]
-                },
-                "parameters": {
-                    "temperature": 0.1,
-                    "top_p": 0.8
-                }
-            }
-            
-            response = requests.post(
-                "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
-                headers=headers,
-                json=data
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                # 新格式的响应中content是一个列表，需要提取text字段
-                content = result["output"]["choices"][0]["message"]["content"]
-                extracted_text = ""
-                
-                if isinstance(content, list) and len(content) > 0:
-                    # 查找text类型的内容
-                    for item in content:
-                        if isinstance(item, dict) and "text" in item:
-                            extracted_text = item["text"]
-                            break
-                    # 如果没有找到text字段，返回第一个字符串内容
-                    if not extracted_text:
-                        for item in content:
-                            if isinstance(item, str):
-                                extracted_text = item
-                                break
-                elif isinstance(content, str):
-                    extracted_text = content
-                else:
-                    extracted_text = str(content)
-                
+            if result:
                 # 清理编码问题
                 def clean_text(text):
                     if not isinstance(text, str):
@@ -257,13 +204,13 @@ class MultimodalProcessor:
                         text = ''.join(char for char in text if ord(char) < 65536)
                     return text
                 
-                return clean_text(extracted_text)
+                return clean_text(result)
             else:
-                self.logger.error(f"视觉模型API错误: {response.status_code} - {response.text}")
+                self.logger.error("智谱视觉模型调用失败")
                 return "图像识别失败，请重新上传或输入文字题目。"
                 
         except Exception as e:
-            self.logger.error(f"图像文本提取出错: {str(e)}")
+            self.logger.error(f"智谱视觉模型图像文本提取出错: {str(e)}")
             return "图像处理出错，请重新上传或输入文字题目。"
     
     def _call_tongyi_model(self, question: str) -> str:

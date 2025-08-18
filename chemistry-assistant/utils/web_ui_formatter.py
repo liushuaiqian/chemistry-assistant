@@ -16,6 +16,19 @@ from typing import Any, Dict, Union, Optional
 # 导入基础的输出清理器
 from .output_cleaner import output_cleaner
 
+# 新增：集成 LangChain 的输出解析工具
+try:
+    from langchain_core.output_parsers import StrOutputParser
+    try:
+        # JsonOutputParser 在较新版本中位于 langchain_core
+        from langchain_core.output_parsers import JsonOutputParser  # type: ignore
+    except Exception:  # 兼容旧版本
+        JsonOutputParser = None  # type: ignore
+except Exception:
+    # 如果未安装 LangChain，保持兼容
+    StrOutputParser = None  # type: ignore
+    JsonOutputParser = None  # type: ignore
+
 class WebUIFormatter:
     """
     Web UI 格式化器类
@@ -231,31 +244,93 @@ class WebUIFormatter:
             str: 优化后的文本
         """
         try:
+            # 检查文本是否已包含chemical-equation类，避免重复格式化
+            if 'class="chemical-equation"' in text:
+                self.logger.debug("文本已包含化学方程式格式化标签，跳过处理")
+                return text
+            
+            # 更精确的化学方程式判定函数
+            def is_likely_chemical_equation(content: str) -> bool:
+                """判断内容是否可能是化学方程式"""
+                content = content.strip()
+                
+                # 检查是否已经是 MathJax 格式（避免重复处理）
+                if content.startswith(('$', '\\(', '\\[', '\\ce{', '\\cee{')):
+                    return False
+                
+                # 检查是否已经是HTML标签（避免重复处理）
+                if content.startswith('<') and content.endswith('>'):
+                    return False
+                
+                # 化学方程式的特征模式
+                chemical_patterns = [
+                    r'[A-Z][a-z]?[\d₀-₉]*\s*[+\-→←↔=]\s*[A-Z][a-z]?',  # 化学反应式
+                    r'[A-Z][a-z]?[\d₀-₉]*\s*\+\s*[A-Z][a-z]?[\d₀-₉]*\s*→',  # 反应箭头
+                    r'[A-Z][a-z]?[\d₀-₉]*\s*=\s*[A-Z][a-z]?[\d₀-₉]*',  # 等号连接的化学式
+                    r'[\d\s]*[A-Z][a-z]?[\d₀-₉]*[\(\)]?[\d₀-₉]*\s*[→←↔]\s*[\d\s]*[A-Z][a-z]?',  # 带系数的反应
+                ]
+                
+                # 常见化学符号和离子
+                chemical_symbols = [
+                    'H₂O', 'CO₂', 'SO₄', 'NO₃', 'NH₄', 'OH⁻', 'Cl⁻', 'Na⁺', 'K⁺', 'Ca²⁺', 'Mg²⁺',
+                    'H2O', 'CO2', 'SO4', 'NO3', 'NH4', 'NaCl', 'KCl', 'CaCl2', 'MgCl2',
+                    'Al₂O₃', 'Fe₂O₃', 'CuSO₄', 'AgNO₃', 'BaSO₄', 'Al2O3', 'Fe2O3', 'CuSO4'
+                ]
+                
+                # 反应条件和箭头
+                reaction_indicators = ['→', '←', '↔', '⇌', '→', '⟶', '⟵', '⇄']
+                
+                # 检查是否包含化学反应特征
+                has_chemical_pattern = any(re.search(pattern, content) for pattern in chemical_patterns)
+                has_chemical_symbols = any(symbol in content for symbol in chemical_symbols)
+                has_reaction_arrow = any(arrow in content for arrow in reaction_indicators)
+                
+                # 排除纯文本描述（如包含过多中文或英文单词）
+                chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', content))
+                english_words = len(re.findall(r'\b[a-zA-Z]{3,}\b', content))
+                
+                # 如果中文字符或长英文单词过多，可能不是化学方程式
+                if chinese_chars > 5 or english_words > 3:
+                    # 除非明确包含反应箭头
+                    return has_reaction_arrow
+                
+                # 综合判断
+                return (has_chemical_pattern or (has_chemical_symbols and has_reaction_arrow))
+            
             # 检测表格中的化学方程式并添加CSS类
-            # 匹配表格行中包含化学方程式的内容
             def add_equation_class(match):
-                content = match.group(1)
-                # 如果包含化学方程式特征（箭头、化学符号等），添加CSS类
-                if any(symbol in content for symbol in ['→', '←', '↔', 'C₆H₆', 'H₂O', 'CO₂', 'SO₄', 'NO₃']):
-                    return f'| <span class="chemical-equation">{content}</span> |'
+                content = match.group(1).strip()
+                
+                # 检查是否已包含HTML标签，避免重复处理
+                if '<span' in content and 'chemical-equation' in content:
+                    return match.group(0)
+                
+                # 使用精确判定
+                if is_likely_chemical_equation(content):
+                    # 添加无障碍属性和语义角色
+                    return f'| <span class="chemical-equation" role="math" aria-label="化学方程式: {content}" title="化学方程式">{content}</span> |'
                 return match.group(0)
             
-            # 匹配表格中第二列的内容（通常是方程式列）
-            text = re.sub(r'\|\s*([^|]*(?:→|←|↔|C₆H₆|H₂O|CO₂|SO₄|NO₃)[^|]*)\s*\|', add_equation_class, text)
+            # 匹配表格中可能包含化学内容的单元格
+            # 不再硬编码为第二列，而是检查所有单元格
+            text = re.sub(r'\|\s*([^|]+)\s*\|', add_equation_class, text)
             
-            # 确保表格有适当的换行
-            # 修复可能的表格格式问题
+            # 处理可能的 MathJax 化学方程式转换
+            text = self._convert_chemical_to_mathjax(text)
+            
+            # 确保表格格式正确
             lines = text.split('\n')
             formatted_lines = []
             
             for line in lines:
-                if '|' in line and any(symbol in line for symbol in ['→', '←', '↔']):
-                    # 确保表格行不会被意外换行
-                    line = line.strip()
-                    # 移除多余的空格但保持表格结构
+                if '|' in line and not line.strip().startswith('|'):
+                    # 修复表格格式
+                    line = '|' + line if not line.startswith('|') else line
+                    line = line + '|' if not line.endswith('|') else line
+                    # 规范化空格
                     line = re.sub(r'\s*\|\s*', ' | ', line)
-                    line = re.sub(r'^\s*\|', '|', line)
-                    line = re.sub(r'\|\s*$', '|', line)
+                    line = re.sub(r'^\s*\|\s*', '| ', line)
+                    line = re.sub(r'\s*\|\s*$', ' |', line)
                 
                 formatted_lines.append(line)
             
@@ -265,6 +340,84 @@ class WebUIFormatter:
             self.logger.error(f"表格方程式优化失败: {str(e)}")
             return text
     
+    def _convert_chemical_to_mathjax(self, text: str) -> str:
+        """
+        将识别出的化学方程式转换为 MathJax 格式（可选优化）
+        
+        Args:
+            text: 包含化学方程式的文本
+            
+        Returns:
+            str: 转换后的文本
+        """
+        try:
+            # 简单的化学方程式转 \ce{} 格式
+            def convert_to_ce(match):
+                equation = match.group(1)
+                # 简单转换：如果包含明显的化学反应
+                if any(arrow in equation for arrow in ['→', '←', '↔', '=']):
+                    # 清理并转换为 MathJax mhchem 格式
+                    cleaned = equation.replace('→', ' -> ').replace('←', ' <- ').replace('↔', ' <-> ')
+                    return f'$\\ce{{{cleaned}}}$'
+                return match.group(0)
+            
+            # 修改正则表达式以匹配带有完整属性的chemical-equation span标签
+            # 匹配 <span class="chemical-equation" role="math" aria-label="..." title="...">...</span>
+            pattern = r'<span[^>]*class="chemical-equation"[^>]*>([^<]+)</span>'
+            text = re.sub(pattern, convert_to_ce, text)
+            
+            return text
+            
+        except Exception as e:
+            self.logger.error(f"化学方程式MathJax转换失败: {str(e)}")
+            return text
+    
+    def _format_with_langchain_parsers(self, data: Any) -> Optional[str]:
+        """使用 LangChain 的输出解析器优先格式化输出。
+        - 优先尝试 JsonOutputParser，将结构化结果以 JSON 代码块形式美观展示；
+        - 回退到 StrOutputParser，确保文本输出被可靠清洗；
+        - 如果 LangChain 不可用或解析失败，返回 None 以走原有逻辑。
+        """
+        try:
+            # 如果没有安装 LangChain，直接返回 None
+            if StrOutputParser is None and JsonOutputParser is None:
+                return None
+            
+            # 直接处理字典/列表：优先以 JSON 代码块形式展示
+            if isinstance(data, (dict, list)):
+                pretty = json.dumps(data, ensure_ascii=False, indent=2)
+                return f"```json\n{pretty}\n```"
+            
+            # 处理字符串
+            if isinstance(data, str):
+                # 优先尝试 JSON 解析（仅当看起来像JSON时）
+                looks_like_json = data.strip().startswith(('{', '[')) and data.strip().endswith(('}', ']'))
+                if JsonOutputParser is not None and looks_like_json:
+                    try:
+                        parsed = JsonOutputParser().parse(data)  # type: ignore
+                        pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
+                        return f"```json\n{pretty}\n```"
+                    except Exception:
+                        # JSON 解析失败则回退
+                        pass
+                
+                # 使用 StrOutputParser 进行纯文本解析清洗
+                if StrOutputParser is not None:
+                    try:
+                        parsed_text = StrOutputParser().parse(data)
+                        return str(parsed_text)
+                    except Exception:
+                        pass
+                # 最后回退为原文本
+                return str(data)
+            
+            # 其他类型，交给默认逻辑
+            return None
+        except Exception as e:
+            # 为安全起见，任何异常都不影响原有流程
+            self.logger.debug(f"LangChain解析器格式化失败: {e}")
+            return None
+
     def clean_and_format_for_web(self, raw_output: Any, title: Optional[str] = None) -> str:
         """
         统一的Web UI输出清理和格式化函数
@@ -284,11 +437,16 @@ class WebUIFormatter:
             # 2. 提取核心答案
             answer = self.extract_core_answer(data)
             
-            # 3. 格式化结构化数据
-            if isinstance(answer, (dict, list)):
-                formatted_text = self.format_structured_data(answer)
+            # 2.5 优先尝试使用 LangChain 的输出解析器进行格式化（若可用）
+            lc_formatted = self._format_with_langchain_parsers(answer)
+            if lc_formatted is not None:
+                formatted_text = lc_formatted
             else:
-                formatted_text = str(answer)
+                # 3. 原有格式化逻辑
+                if isinstance(answer, (dict, list)):
+                    formatted_text = self.format_structured_data(answer)
+                else:
+                    formatted_text = str(answer)
             
             # 4. 使用基础清理器清理
             cleaned_text = self.cleaner.clean_model_response(formatted_text)

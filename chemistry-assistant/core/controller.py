@@ -13,6 +13,7 @@ from .llm_manager import LLMManager
 from .chemistry_chain import ChemistryAnalysisChain
 from tools.knowledge_api import KnowledgeAPI
 from agents.tools_agent import ToolsAgent
+from tools.enhanced_comprehensive_retriever import EnhancedComprehensiveRetriever
 
 class Controller:
     """
@@ -60,6 +61,11 @@ class Controller:
             self.logger.info("初始化化学工具Agent...")
             self.tools_agent = ToolsAgent()
             self.logger.info("化学工具Agent初始化成功")
+            
+            # 初始化增强综合检索器
+            self.logger.info("初始化增强综合检索器...")
+            self.enhanced_retriever = EnhancedComprehensiveRetriever(self.llm_manager)
+            self.logger.info("增强综合检索器初始化成功")
             
             # 初始化Agent管理器（暂时跳过知识库相关功能）
             self.logger.info("初始化Agent管理器...")
@@ -431,7 +437,15 @@ class Controller:
                 )
                 self.logger.info("[LangChain处理] 化学分析链处理完成")
                 
-                return result, "", {"solution": result}
+                # 提取主要答案，避免返回复杂的字典结构
+                if isinstance(result, dict) and 'integrated_answer' in result:
+                    main_answer = result['integrated_answer']
+                    self.logger.info(f"[LangChain处理] 提取integrated_answer作为主答案，长度: {len(main_answer)}")
+                    return main_answer, "", {"solution": main_answer, "full_result": result}
+                else:
+                    # 兼容旧格式或异常情况
+                    self.logger.warning("[LangChain处理] 结果格式异常，直接返回原始结果")
+                    return str(result), "", {"solution": str(result)}
                 
             except Exception as e:
                 self.logger.error(f"[LangChain处理] 处理过程中发生异常: {str(e)}")
@@ -520,9 +534,9 @@ class Controller:
                 'sources': []
             }
     
-    def process_comprehensive_retrieval(self, query: str, enable_local_rag=True, enable_metaso=True, enable_tongyi=True, enable_pubchem=True) -> dict:
+    async def process_comprehensive_retrieval(self, query: str, enable_local_rag=True, enable_metaso=True, enable_tongyi=True, enable_pubchem=True, use_llm_summary=True) -> dict:
         """
-        处理综合检索请求，并行调用多个知识库
+        处理综合检索请求，使用增强综合检索器
         
         Args:
             query (str): 用户查询
@@ -530,66 +544,50 @@ class Controller:
             enable_metaso (bool): 是否启用Metaso API
             enable_tongyi (bool): 是否启用通义千问智能体
             enable_pubchem (bool): 是否启用PubChem数据库
+            use_llm_summary (bool): 是否使用LLM进行总结
             
         Returns:
             dict: 综合检索结果
         """
         try:
-            self.logger.info(f"开始综合检索: {query[:50]}...")
+            self.logger.info(f"开始增强综合检索: {query[:50]}...")
             
-            # 使用化学分析链的RAG检索器进行综合检索
-            if hasattr(self.chemistry_chain, 'rag_retriever'):
-                result = self.chemistry_chain.rag_retriever.retrieve_with_external_knowledge(
-                    query=query,
-                    k=5,
-                    include_tongyi=enable_tongyi,
-                    include_metaso=enable_metaso,
-                    include_pubchem=enable_pubchem
-                )
-                
-                # 如果不启用本地RAG，移除本地文档结果
-                if not enable_local_rag:
-                    result['local_documents'] = []
-                    if 'combined_answer' in result:
-                        # 移除本地知识库部分
-                        combined_answer = result['combined_answer']
-                        if '### 本地知识库检索结果:' in combined_answer:
-                            parts = combined_answer.split('### 本地知识库检索结果:')
-                            if len(parts) > 1:
-                                # 保留第一部分（如果有）和外部知识库部分
-                                external_part = parts[1].split('### ')[1:] if '### ' in parts[1] else []
-                                if external_part:
-                                    result['combined_answer'] = '### ' + '### '.join(external_part)
-                                else:
-                                    result['combined_answer'] = parts[0] if parts[0].strip() else ''
-                
-                # 更新成功状态和来源信息
-                result['success'] = True
-                
-                # 构建详细的回答
-                if result.get('combined_answer'):
-                    # 使用LLM整合所有检索结果
-                    integrated_answer = self._integrate_retrieval_results(query, result)
-                    result['combined_answer'] = integrated_answer
-                
-                self.logger.info(f"综合检索完成，使用了{len(result.get('sources', []))}个知识源")
-                return result
-            else:
-                self.logger.warning("RAG检索器不可用，使用简化模式")
-                return {
-                    'success': False,
-                    'error': 'RAG检索器不可用',
-                    'combined_answer': '抱歉，检索系统暂时不可用，请稍后重试。',
-                    'sources': []
-                }
-                
+            # 使用增强综合检索器
+            result = await self.enhanced_retriever.comprehensive_retrieve(
+                query=query,
+                enable_local_rag=enable_local_rag,
+                enable_tongyi=enable_tongyi,
+                enable_metaso=enable_metaso,
+                enable_pubchem=enable_pubchem,
+                use_llm_summary=use_llm_summary
+            )
+            
+            return {
+                'success': True,
+                'combined_answer': result.summary,
+                'sources': [{
+                    'name': source.name,
+                    'content': source.content[:200] + '...' if len(source.content) > 200 else source.content,
+                    'confidence': source.confidence,
+                    'retrieval_time': source.retrieval_time,
+                    'success': source.success
+                } for source in result.sources],
+                'confidence_score': result.confidence_score,
+                'total_time': result.total_time,
+                'strategy': result.strategy_used,
+                'metadata': result.metadata
+            }
+            
         except Exception as e:
-            self.logger.error(f"综合检索异常: {str(e)}")
+            self.logger.error(f"增强综合检索处理异常: {str(e)}")
             return {
                 'success': False,
-                'error': f'检索异常: {str(e)}',
-                'combined_answer': '抱歉，检索过程中发生错误，请稍后重试。',
-                'sources': []
+                'error': str(e),
+                'combined_answer': f"综合检索过程中发生错误: {str(e)}",
+                'sources': [],
+                'confidence_score': 0.0,
+                'total_time': 0.0,
+                'strategy': 'error_fallback'
             }
     
     def _integrate_retrieval_results(self, query: str, retrieval_result: dict) -> str:

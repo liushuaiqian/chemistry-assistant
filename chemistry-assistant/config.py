@@ -24,9 +24,22 @@ MODEL_CONFIG = {
         'api_key': '971d419f21f84b86b950f12935ab5622.RNM4AQGHjXqvbg9a',  # 质谱AI密钥
         'model': 'glm-4',
     },
+    
+    # 智谱视觉模型配置
+    'zhipu_vision': {
+        'api_key': '971d419f21f84b86b950f12935ab5622.RNM4AQGHjXqvbg9a',  # 智谱AI密钥
+        'model': 'glm-4.5v',
+    },
     'claude': {
         'api_key': 'sk-tjqouywcqyitthembwmhdhgaqxqsofzbalhwrpdkbtygaqzw',  # 硅基流动密钥
         'model': 'claude-3-opus-20240229',
+    },
+    
+    # 硅基流动模型配置
+    'siliconflow': {
+        'api_key': 'sk-tjqouywcqyitthembwmhdhgaqxqsofzbalhwrpdkbtygaqzw',  # 硅基流动密钥
+        'api_base': 'https://api.siliconflow.cn/v1',
+        'model': 'baidu/ERNIE-4.5-300B-A47B',
     },
     
     # 通义大模型配置
