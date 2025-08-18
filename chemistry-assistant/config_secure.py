@@ -14,11 +14,12 @@
    from utils.key_manager import store_api_key
    store_api_key('zhipu', 'your_zhipu_key')
    store_api_key('tongyi', 'your_tongyi_key')
-"""
+
 
 
 配置文件
-包含模型配置、知识库配置、外部API配置等
+包含模型配置、知识库配置、外部API配置等；
+支持从环境变量和密钥管理器中安全获取API密钥
 支持从环境变量和密钥管理器中安全获取API密钥
 """
 

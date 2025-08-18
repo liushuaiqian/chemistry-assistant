@@ -97,8 +97,8 @@ MODEL_CONFIG = {
         'model_name': 'bge-large-zh-v1.5',  # 本地模型名称（备用）
         'device': 'cpu',
         'use_api': True,  # 是否使用API模式
-        'api_provider': 'zhipu',  # API提供商: 'zhipu', 'tongyi', 'baichuan'
-        'api_model': 'embedding-3',  # API模型名称
+        'api_provider': 'tongyi',  # API提供商: 'zhipu', 'tongyi', 'baichuan'
+        'api_model': 'multimodal-embedding-v1',  # API模型名称
     }
 }
 

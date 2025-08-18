@@ -13,6 +13,15 @@ from langchain_core.embeddings import Embeddings
 from config import MODEL_CONFIG
 import time
 import json
+from http import HTTPStatus
+
+# 尝试导入 dashscope，如果失败则使用 HTTP 请求
+try:
+    import dashscope
+    DASHSCOPE_AVAILABLE = True
+except ImportError:
+    DASHSCOPE_AVAILABLE = False
+    print("警告: dashscope 未安装，将使用 HTTP 请求方式调用通义 API")
 
 class APIEmbeddingModel(Embeddings):
     """
@@ -37,8 +46,8 @@ class APIEmbeddingModel(Embeddings):
             self.model_name = model_name or 'embedding-2'
             self.api_url = 'https://open.bigmodel.cn/api/paas/v4/embeddings'
         elif provider == 'tongyi':
-            self.model_name = model_name or 'text-embedding-v1'
-            self.api_url = 'https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding'
+            self.model_name = model_name or 'multimodal-embedding-v1'
+            self.api_url = 'https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding'
         elif provider == 'baichuan':
             self.model_name = model_name or 'Baichuan-Text-Embedding'
             self.api_url = 'https://api.baichuan-ai.com/v1/embeddings'
@@ -47,6 +56,10 @@ class APIEmbeddingModel(Embeddings):
         
         if not self.api_key:
             raise ValueError(f"未配置{provider}的API密钥")
+        
+        # 为 tongyi 提供商设置 dashscope API key
+        if provider == 'tongyi' and DASHSCOPE_AVAILABLE:
+            dashscope.api_key = self.api_key
         
         print(f"初始化{provider}嵌入模型: {self.model_name}")
     
@@ -86,6 +99,9 @@ class APIEmbeddingModel(Embeddings):
                 'model': self.model_name,
                 'input': {
                     'texts': texts if isinstance(texts, list) else [texts]
+                },
+                'parameters': {
+                    'text_type': 'document'
                 }
             }
         elif self.provider == 'baichuan':
@@ -113,6 +129,42 @@ class APIEmbeddingModel(Embeddings):
             print(f"解析API响应失败: {e}")
             return []
     
+    def _get_tongyi_embedding_with_sdk(self, texts):
+        """
+        使用 dashscope SDK 获取通义嵌入向量
+        
+        Args:
+            texts (str or list): 输入文本或文本列表
+            
+        Returns:
+            list: 嵌入向量列表
+        """
+        try:
+            # 准备输入格式
+            if isinstance(texts, str):
+                input_data = [{'text': texts}]
+            else:
+                input_data = [{'text': text} for text in texts]
+            
+            # 调用 dashscope API
+            resp = dashscope.MultiModalEmbedding.call(
+                model=self.model_name,
+                input=input_data
+            )
+            
+            if resp.status_code == HTTPStatus.OK:
+                embeddings = []
+                for item in resp.output['embeddings']:
+                    embeddings.append(item['embedding'])
+                return embeddings
+            else:
+                print(f"Dashscope API 调用失败: {resp.code}, {resp.message}")
+                return None
+                
+        except Exception as e:
+            print(f"Dashscope SDK 调用出错: {e}")
+            return None
+    
     def get_embedding(self, text):
         """
         获取单个文本的向量表示
@@ -124,6 +176,15 @@ class APIEmbeddingModel(Embeddings):
             numpy.ndarray: 文本的向量表示
         """
         try:
+            # 对于 tongyi 提供商，优先使用 dashscope SDK
+            if self.provider == 'tongyi' and DASHSCOPE_AVAILABLE:
+                embeddings = self._get_tongyi_embedding_with_sdk(text)
+                if embeddings:
+                    return np.array(embeddings[0], dtype=np.float32)
+                else:
+                    print("使用 dashscope SDK 失败，回退到 HTTP 请求")
+            
+            # 使用 HTTP 请求方式
             headers = self._get_headers()
             data = self._prepare_request_data(text)
             
@@ -167,6 +228,17 @@ class APIEmbeddingModel(Embeddings):
             batch_texts = texts[i:i+batch_size]
             
             try:
+                # 对于 tongyi 提供商，优先使用 dashscope SDK
+                if self.provider == 'tongyi' and DASHSCOPE_AVAILABLE:
+                    embeddings = self._get_tongyi_embedding_with_sdk(batch_texts)
+                    if embeddings:
+                        all_embeddings.extend(embeddings)
+                        time.sleep(0.1)  # 避免API限流
+                        continue
+                    else:
+                        print(f"批次 {i//batch_size + 1} 使用 dashscope SDK 失败，回退到 HTTP 请求")
+                
+                # 使用 HTTP 请求方式
                 headers = self._get_headers()
                 data = self._prepare_request_data(batch_texts)
                 
