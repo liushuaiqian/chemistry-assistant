@@ -1,22 +1,24 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
 """
-ERNIE VL视觉模型集成测试脚本
-测试ERNIE 4.5 Turbo VL模型在化学助手中的集成效果
+测试ERNIE VL视觉模型在ChemistryAnalysisChain中的集成
 """
 
 import sys
-import os
-import base64
-import logging
 from pathlib import Path
 
-# 添加项目根目录到Python路径
-project_root = Path(__file__).parent
+# 将项目根目录（tests 的上一级）加入到 sys.path
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from core.chemistry_chain import ChemistryAnalysisChain
 from config import MODEL_CONFIG
+import os
+import base64
+import logging
+
+# 上面已设置项目根目录并导入所需模块，这里移除重复代码
 
 # 配置日志
 logging.basicConfig(

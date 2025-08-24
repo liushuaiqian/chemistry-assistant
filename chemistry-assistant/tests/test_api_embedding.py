@@ -9,8 +9,8 @@ API嵌入模型测试脚本
 import sys
 from pathlib import Path
 
-# 添加项目根目录到Python路径
-project_root = Path(__file__).parent
+# 添加项目根目录到Python路径（tests 的上一级目录）
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from models.api_embedding_model import APIEmbeddingModel, create_zhipu_embedding, create_tongyi_embedding

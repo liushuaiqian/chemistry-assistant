@@ -12,7 +12,8 @@ import re
 import time
 import socket
 from datetime import datetime
-from pyngrok import ngrok
+# 移除顶层对 pyngrok 的强制导入，避免在未安装 pyngrok 时启动失败
+# from pyngrok import ngrok
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -329,7 +330,15 @@ def start_ui(controller=None):
             # 使用统一渲染器处理不同类型的输出
             cleaned_answer = render_content(answer)
             cleaned_comparison = render_comparison_output(comp)
-            cleaned_chain_result = render_chain_result(chain)
+            # 显示原始链式处理结果，不进行渲染
+            if chain:
+                if isinstance(chain, dict):
+                    import json
+                    cleaned_chain_result = f"```json\n{json.dumps(chain, ensure_ascii=False, indent=2)}\n```"
+                else:
+                    cleaned_chain_result = f"```\n{str(chain)}\n```"
+            else:
+                cleaned_chain_result = "暂无链式处理结果"
             
             # 构建自适应状态信息
             if adaptive_enabled and hasattr(controller, 'get_last_retrieval_info'):
@@ -705,7 +714,7 @@ def start_ui(controller=None):
                 submit_btn = gr.Button("提交问题", variant="primary")
                 answer_output = gr.Markdown(label="回答")
                 comparison_output = gr.Markdown(label="模型答案对比分析")
-                chain_result_output = gr.Markdown(label="LangChain链式分析结果")
+                chain_result_output = gr.Markdown(label="链式处理结果（原始输出）")
                 adaptive_status_output = gr.Textbox(label="自适应检索状态", interactive=False, lines=1)
                 clear_btn = gr.Button("清除当前对话")
                 
@@ -1259,45 +1268,87 @@ def start_ui(controller=None):
                 continue
         return None
     
-    # 查找可用端口
-    available_port = find_free_port()
+    # 解析分享/隧道配置（环境变量优先）
+    enable_ngrok = str(os.getenv('ENABLE_NGROK', 'false')).strip().lower() in {'1', 'true', 'yes', 'on'}
+    gradio_share = str(os.getenv('GRADIO_SHARE', 'true')).strip().lower() in {'1', 'true', 'yes', 'on'}
+    ngrok_token = os.getenv('NGROK_AUTH_TOKEN')
+
+    # 优先从环境变量 PORT 或 UI_CONFIG 中读取端口，否则自动寻找
+    env_port = os.getenv('PORT')
+    if env_port:
+        try:
+            available_port = int(env_port)
+        except ValueError:
+            print(f"⚠️ 环境变量 PORT 值无效: {env_port}，将自动寻找可用端口")
+            available_port = None
+    else:
+        available_port = None
+
+    if available_port is None:
+        # UI_CONFIG 可能来自不同配置文件，安全读取
+        default_port = None
+        try:
+            default_port = UI_CONFIG.get('port') or UI_CONFIG.get('web_port')
+        except Exception:
+            default_port = None
+        if isinstance(default_port, int):
+            available_port = default_port
+        else:
+            available_port = find_free_port()
+
     if available_port is None:
         print("❌ 无法找到可用端口，请手动指定端口")
         available_port = 0  # 让Gradio自动分配
     else:
         print(f"🌐 使用端口: {available_port}")
     
-    # 配置Ngrok
-    try:
-        # 设置Ngrok认证token
-        ngrok.set_auth_token("30wI9yvO37ZIJZLmGMFO1RcuHjm_3axwVACtnAwToAeUFirKF")
-        print("✅ Ngrok认证token已设置")
-        
-        # 创建Ngrok隧道
-        public_url = ngrok.connect(available_port)
-        print(f"🌍 公网访问地址: {public_url}")
-        print(f"📱 您可以通过以下链接在任何设备上访问应用: {public_url}")
-        
-    except Exception as e:
-        print(f"⚠️ Ngrok配置失败: {e}")
-        print("将使用本地模式启动")
-        public_url = None
-    
+    public_url = None
+    use_ngrok = False
+
+    # 若启用 ngrok，则优先使用 ngrok，且不再使用 Gradio 内置分享
+    if enable_ngrok:
+        if not ngrok_token:
+            print("⚠️ 检测到 ENABLE_NGROK=true，但未提供 NGROK_AUTH_TOKEN，已自动禁用 ngrok")
+        else:
+            try:
+                # 设置Ngrok认证token
+                from pyngrok import ngrok
+                ngrok.set_auth_token(ngrok_token)
+                print("✅ Ngrok认证token已设置")
+                
+                # 创建Ngrok隧道
+                tunnel = ngrok.connect(available_port)
+                public_url = getattr(tunnel, 'public_url', str(tunnel))
+                use_ngrok = True
+                print(f"🌍 公网访问地址（ngrok）: {public_url}")
+                print(f"📱 您可以通过以上链接在任何设备上访问应用")
+            except Exception as e:
+                print(f"⚠️ Ngrok配置失败: {e}")
+                print("将回退为本地/Gradio分享模式")
+                public_url = None
+                use_ngrok = False
+                # 若 ngrok 失败，不要抛出异常，继续启动本地/Gradio 分享
+
+    # 当使用 ngrok 时禁止 share，避免冲突；否则根据 GRADIO_SHARE 控制
+    launch_share = (not use_ngrok) and gradio_share
+
     demo.launch(
         server_name="127.0.0.1",
         server_port=available_port,
-        share=True,  # 启用Gradio内置分享功能作为备选
+        share=launch_share,
         inbrowser=True,
         show_error=True,
         quiet=False
     )
     
-    # 清理Ngrok隧道
-    try:
-        ngrok.disconnect(public_url)
-        print("🔌 Ngrok隧道已断开")
-    except:
-        pass
+    # 清理Ngrok隧道（仅在启用并成功时）
+    if use_ngrok and public_url:
+        try:
+            from pyngrok import ngrok
+            ngrok.disconnect(public_url)
+            print("🔌 Ngrok隧道已断开")
+        except Exception as e:
+            print(f"⚠️ 断开Ngrok隧道时出现问题: {e}")
     
     return demo
 

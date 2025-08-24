@@ -7,7 +7,8 @@
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# 调整为项目根目录（tests 的上一级目录）
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.chemistry_solver import ChemistrySolver
 
